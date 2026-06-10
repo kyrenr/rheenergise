@@ -75,3 +75,15 @@ body {
 .rhe-glow {
   text-shadow: 0 0 18px rgba(204, 255, 0, 0.35);
 }
+
+/* One-page A4 export via the browser's print-to-PDF */
+@media print {
+  @page {
+    size: A4;
+    margin: 10mm;
+  }
+  html,
+  body {
+    background: #ffffff;
+  }
+}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Area,
   Bar,
@@ -16,6 +16,7 @@ import {
 import {
   AlertTriangle,
   ArrowRight,
+  BadgeCheck,
   BatteryCharging,
   CalendarRange,
   CircleCheck,
@@ -24,13 +25,16 @@ import {
   Gauge,
   Landmark,
   Leaf,
+  Link2,
   MapPin,
   Mountain,
   Percent,
   PiggyBank,
+  Printer,
   RefreshCcw,
   Scale,
   ShieldCheck,
+  Snowflake,
   Sun,
   TrendingUp,
   Wind,
@@ -86,6 +90,7 @@ const TECH = {
 }
 
 const CYCLES_PER_YEAR = 330 // one full cycle per day with maintenance margin
+const GAS_CO2_T_PER_MWH = 0.35 // unabated CCGT displaced at firming hours
 
 // Sensitivity: where do Lithium-ion prices go from here?
 const LI_OUTLOOKS = [
@@ -192,7 +197,7 @@ function cumulativeCashCurve(powerMW, durationHours, years, liFactor) {
  * differential never pays back inside the window.
  */
 function hdVsLiInvestmentCase(powerMW, durationHours, years, liFactor) {
-  const hd = cashCostSchedule('hdHydro', powerMW, durationHours, years, liFactor)
+  const hd = cashCostSchedule('hdHydro', powerMW, durationHours, years)
   const li = cashCostSchedule('lithium', powerMW, durationHours, years, liFactor)
   const diff = hd.map((c, y) => li[y] - c) // positive = HD saves cash that year
 
@@ -284,30 +289,58 @@ function solarShape(h, peakShare) {
   return Math.sin((Math.PI * (h - 6)) / 13) * peakShare
 }
 
+// Winter stress week: windy start, a three-day wind lull mid-week, weak
+// seasonal solar, and a quieter factory weekend at Deeside.
+const WINTER_WIND_DAY_FACTORS = [1.2, 1.15, 0.9, 0.3, 0.22, 0.6, 1.1]
+const WINTER_SOLAR_FACTOR = 0.35
+const WEEK_DEMAND_FACTORS = [1, 1, 1, 1, 1, 0.75, 0.7] // Deeside weekend only
+
 /* ------------------------------------------------------------------ */
-/*  24-HOUR FIRMING SIMULATION                                         */
+/*  STORAGE SIMULATION (any horizon)                                   */
 /* ------------------------------------------------------------------ */
 
-function simulateDay(preset, windMW, solarMW, demandMW, storagePowerMW, durationHours) {
-  const oneWayEff = Math.sqrt(TECH.hdHydro.rte) // 80% RTE split across charge/discharge
-  const energyCapMWh = storagePowerMW * durationHours
-
+function buildDayProfiles(preset, windMW, solarMW, demandMW) {
   const shapeAvg = preset.windShape.reduce((a, b) => a + b, 0) / 24
   const wind = HOURS.map(
     (h) => windMW * preset.windShape[h] * (preset.windCapacityFactor / shapeAvg),
   )
   const solar = HOURS.map((h) => solarMW * solarShape(h, preset.solarPeakShare))
-  const gen = HOURS.map((h) => wind[h] + solar[h])
-
-  // Customer demand: a flat contracted block (Anglesey) or the factory's
-  // day-shift profile scaled to its peak (Deeside).
   const load =
     preset.id === 'anglesey'
       ? HOURS.map(() => demandMW)
       : INDUSTRIAL_SHAPE.map((s) => s * demandMW)
+  const labels = HOURS.map((h) => `${String(h).padStart(2, '0')}:00`)
+  return { wind, solar, load, labels }
+}
 
-  // Repeat identical days until the state of charge reaches a cyclic steady
-  // state (start-of-day SoC stops moving), then report that settled day.
+function buildWeekProfiles(preset, windMW, solarMW, demandMW) {
+  const day = buildDayProfiles(preset, windMW, solarMW, demandMW)
+  const wind = []
+  const solar = []
+  const load = []
+  const labels = []
+  for (let d = 0; d < 7; d += 1) {
+    for (const h of HOURS) {
+      wind.push(Math.min(windMW, day.wind[h] * WINTER_WIND_DAY_FACTORS[d]))
+      solar.push(day.solar[h] * WINTER_SOLAR_FACTOR)
+      load.push(preset.id === 'deeside' ? day.load[h] * WEEK_DEMAND_FACTORS[d] : day.load[h])
+      labels.push(`D${d + 1} ${String(h).padStart(2, '0')}:00`)
+    }
+  }
+  return { wind, solar, load, labels }
+}
+
+/**
+ * Run the store against any generation/load horizon (24h day or 168h week).
+ * The horizon is repeated until the state of charge reaches a cyclic steady
+ * state, then the settled pass is reported.
+ */
+function runStorageSim(preset, profiles, storagePowerMW, durationHours) {
+  const { wind, solar, load, labels } = profiles
+  const N = load.length
+  const oneWayEff = Math.sqrt(TECH.hdHydro.rte) // 80% RTE split across charge/discharge
+  const energyCapMWh = storagePowerMW * durationHours
+
   let soc = energyCapMWh * 0.5
   let greenIn = 0
   let gridIn = 0
@@ -320,18 +353,20 @@ function simulateDay(preset, windMW, solarMW, demandMW, storagePowerMW, duration
     if (settled || d === 29) {
       greenIn = 0
       gridIn = 0
-      day = runDay(true)
+      day = runPass(true)
       break
     }
-    runDay(false)
+    runPass(false)
   }
 
-  function runDay(record) {
+  function runPass(record) {
     const rows = []
-    for (const h of HOURS) {
-      const L = load[h]
-      const direct = Math.min(gen[h], L)
-      const surplus = gen[h] - direct
+    for (let i = 0; i < N; i += 1) {
+      const h = i % 24
+      const gen = wind[i] + solar[i]
+      const L = load[i]
+      const direct = Math.min(gen, L)
+      const surplus = gen - direct
       const deficit = L - direct
 
       // Catch excess renewable power.
@@ -358,9 +393,9 @@ function simulateDay(preset, windMW, solarMW, demandMW, storagePowerMW, duration
       if (record) {
         rows.push({
           hour: h,
-          label: `${String(h).padStart(2, '0')}:00`,
-          wind: wind[h],
-          solar: solar[h],
+          label: labels[i],
+          wind: wind[i],
+          solar: solar[i],
           load: L,
           discharge,
           charge: -(charge + gridCharge),
@@ -393,6 +428,7 @@ function simulateDay(preset, windMW, solarMW, demandMW, storagePowerMW, duration
   const peakGridAfter =
     peakLoad > 0 ? (Math.max(0, peakLoad - peakDirect - peakDischarge) / peakLoad) * 100 : 0
 
+  const daysSimulated = N / 24
   return {
     day,
     firmingFactor,
@@ -400,7 +436,8 @@ function simulateDay(preset, windMW, solarMW, demandMW, storagePowerMW, duration
     genCoverage,
     peakGridBefore,
     peakGridAfter,
-    dailyGreenCharge: greenIn, // renewable surplus captured per day (MWh)
+    dailyGreenCharge: greenIn / daysSimulated, // renewable surplus captured per day (MWh)
+    dailyGreenServed: greenServed / daysSimulated, // green energy delivered per day (MWh)
     energyCapMWh,
     storagePowerMW,
   }
@@ -413,12 +450,42 @@ function simulateDay(preset, windMW, solarMW, demandMW, storagePowerMW, duration
 const fmtMW = (v) => `${Math.round(v).toLocaleString('en-GB')} MW`
 const fmtMWh = (v) => `${Math.round(v).toLocaleString('en-GB')} MWh`
 const fmtPerMWh = (v) => `£${Math.round(v).toLocaleString('en-GB')}/MWh`
+const fmtTonnes = (v) => `${Math.round(v).toLocaleString('en-GB')} t`
 
 function fmtMillions(value) {
   const m = value / 1e6
   if (Math.abs(m) >= 1000) return `£${(m / 1000).toFixed(2)}B`
   return `£${m.toFixed(1)}M`
 }
+
+/* ------------------------------------------------------------------ */
+/*  SHAREABLE SCENARIO LINKS                                           */
+/* ------------------------------------------------------------------ */
+
+function initialStateFromUrl() {
+  const q = new URLSearchParams(window.location.search)
+  const num = (key, def, min, max) => {
+    const raw = q.get(key)
+    const v = Number(raw)
+    return raw !== null && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : def
+  }
+  const presetId = PRESETS[q.get('p')] ? q.get('p') : 'anglesey'
+  const d = PRESETS[presetId]
+  return {
+    presetId,
+    windMW: num('w', d.defaultWindMW, 0, 200),
+    solarMW: num('s', d.defaultSolarMW, 0, 100),
+    demandMW: num('d', d.defaultDemandMW, 10, 150),
+    storageMW: num('sp', d.defaultDemandMW, 10, 150),
+    durationHours: num('h', 8, 4, 16),
+    years: num('y', 25, 10, 60),
+    discountPct: num('r', 7, 4, 12),
+    liOutlookId: LI_OUTLOOKS.some((o) => o.id === q.get('li')) ? q.get('li') : 'flat',
+    viewMode: q.get('v') === 'week' ? 'week' : 'day',
+  }
+}
+
+const INIT = initialStateFromUrl()
 
 /* ------------------------------------------------------------------ */
 /*  UI PRIMITIVES                                                      */
@@ -494,15 +561,17 @@ function ChartTooltip({ active, payload, label }) {
 /* ------------------------------------------------------------------ */
 
 export default function FirmingCalculator() {
-  const [presetId, setPresetId] = useState('anglesey')
-  const [windMW, setWindMW] = useState(PRESETS.anglesey.defaultWindMW)
-  const [solarMW, setSolarMW] = useState(PRESETS.anglesey.defaultSolarMW)
-  const [demandMW, setDemandMW] = useState(PRESETS.anglesey.defaultDemandMW)
-  const [storageMW, setStorageMW] = useState(PRESETS.anglesey.defaultDemandMW)
-  const [durationHours, setDurationHours] = useState(8)
-  const [years, setYears] = useState(25)
-  const [discountPct, setDiscountPct] = useState(7)
-  const [liOutlookId, setLiOutlookId] = useState('flat')
+  const [presetId, setPresetId] = useState(INIT.presetId)
+  const [windMW, setWindMW] = useState(INIT.windMW)
+  const [solarMW, setSolarMW] = useState(INIT.solarMW)
+  const [demandMW, setDemandMW] = useState(INIT.demandMW)
+  const [storageMW, setStorageMW] = useState(INIT.storageMW)
+  const [durationHours, setDurationHours] = useState(INIT.durationHours)
+  const [years, setYears] = useState(INIT.years)
+  const [discountPct, setDiscountPct] = useState(INIT.discountPct)
+  const [liOutlookId, setLiOutlookId] = useState(INIT.liOutlookId)
+  const [viewMode, setViewMode] = useState(INIT.viewMode)
+  const [linkCopied, setLinkCopied] = useState(false)
 
   const preset = PRESETS[presetId]
   const liOutlook = LI_OUTLOOKS.find((o) => o.id === liOutlookId)
@@ -516,12 +585,75 @@ export default function FirmingCalculator() {
     setStorageMW(PRESETS[id].defaultDemandMW)
   }
 
+  // Keep the URL in sync so any configuration can be shared as a link.
+  useEffect(() => {
+    const q = new URLSearchParams({
+      p: presetId,
+      w: windMW,
+      s: solarMW,
+      d: demandMW,
+      sp: storageMW,
+      h: durationHours,
+      y: years,
+      r: discountPct,
+      li: liOutlookId,
+      v: viewMode,
+    })
+    window.history.replaceState(null, '', `?${q.toString()}`)
+  }, [presetId, windMW, solarMW, demandMW, storageMW, durationHours, years, discountPct, liOutlookId, viewMode])
+
+  const scenarioQuery = new URLSearchParams({
+    p: presetId,
+    w: windMW,
+    s: solarMW,
+    d: demandMW,
+    sp: storageMW,
+    h: durationHours,
+    y: years,
+    r: discountPct,
+    li: liOutlookId,
+    v: viewMode,
+  }).toString()
+  const scenarioLink = `${window.location.origin}${window.location.pathname}?${scenarioQuery}`
+
+  const copyScenarioLink = async () => {
+    try {
+      await navigator.clipboard.writeText(scenarioLink)
+      setLinkCopied(true)
+      setTimeout(() => setLinkCopied(false), 2000)
+    } catch {
+      window.prompt('Copy this scenario link:', scenarioLink)
+    }
+  }
+
   const energyCapMWh = storageMW * durationHours
 
-  const sim = useMemo(
-    () => simulateDay(preset, windMW, solarMW, demandMW, storageMW, durationHours),
+  // Typical-day simulation always runs: it anchors annualised metrics.
+  const simDay = useMemo(
+    () =>
+      runStorageSim(
+        preset,
+        buildDayProfiles(preset, windMW, solarMW, demandMW),
+        storageMW,
+        durationHours,
+      ),
     [preset, windMW, solarMW, demandMW, storageMW, durationHours],
   )
+
+  const simWeek = useMemo(
+    () =>
+      viewMode === 'week'
+        ? runStorageSim(
+            preset,
+            buildWeekProfiles(preset, windMW, solarMW, demandMW),
+            storageMW,
+            durationHours,
+          )
+        : null,
+    [viewMode, preset, windMW, solarMW, demandMW, storageMW, durationHours],
+  )
+
+  const sim = viewMode === 'week' && simWeek ? simWeek : simDay
 
   const lcos = useMemo(
     () => ({
@@ -559,7 +691,7 @@ export default function FirmingCalculator() {
     [storageMW, durationHours, years, liOutlookId],
   )
 
-  // Executive metrics ------------------------------------------------
+  // Executive metrics (annualised from the typical day) ---------------
   const annualDischargeHD = CYCLES_PER_YEAR * energyCapMWh * TECH.hdHydro.rte
   const lifetimeSavings = (lcos.lithium - lcos.hdHydro) * annualDischargeHD * years
   const augmentations = lithiumAugmentations(years)
@@ -572,8 +704,11 @@ export default function FirmingCalculator() {
     liOutlook.factor
   const hdAdvantagePct =
     lcos.lithium > 0 ? ((lcos.lithium - lcos.hdHydro) / lcos.lithium) * 100 : 0
+  const annualCO2Avoided = simDay.dailyGreenServed * 365 * GAS_CO2_T_PER_MWH
+  const annualCurtailmentGWh = (simDay.dailyGreenCharge * 365) / 1000
 
   const storageVsDemand = storageMW / Math.max(demandMW, 1)
+  const capFloorEligible = durationHours >= 8
 
   const advice =
     durationHours <= 5
@@ -594,8 +729,12 @@ export default function FirmingCalculator() {
             body: 'Volumetric efficiency and a 60-year infrastructure lifecycle mean RheEnergise provides the lowest cost, zero-degradation baseload hedge on the market.',
           }
 
+  const kpiBefore = presetId === 'anglesey' ? sim.bareCoverage : sim.peakGridBefore
+  const kpiAfter = presetId === 'anglesey' ? sim.firmingFactor : sim.peakGridAfter
+
   return (
-    <div className="min-h-screen bg-[#0F172A] pb-10 font-sans text-slate-200">
+    <>
+    <div className="min-h-screen bg-[#0F172A] pb-10 font-sans text-slate-200 print:hidden">
       {/* ============ HEADER ============ */}
       <header className="border-b border-slate-800 bg-[#121824]">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-4">
@@ -612,15 +751,25 @@ export default function FirmingCalculator() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-[11px] font-semibold">
-            <span className="border border-slate-700 px-2.5 py-1 text-slate-400">
-              80% Round-Trip Efficiency
-            </span>
-            <span className="border border-slate-700 px-2.5 py-1 text-slate-400">
-              60-Year Asset Life
-            </span>
+          <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold">
+            <button
+              type="button"
+              onClick={copyScenarioLink}
+              className="flex items-center gap-1.5 border border-slate-600 px-2.5 py-1 text-slate-300 transition-colors hover:border-[#CCFF00] hover:text-[#CCFF00]"
+            >
+              <Link2 size={12} aria-hidden="true" />
+              {linkCopied ? 'Link copied!' : 'Copy Scenario Link'}
+            </button>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="flex items-center gap-1.5 border border-[#CCFF00]/60 bg-[#CCFF00]/10 px-2.5 py-1 text-[#CCFF00] transition-colors hover:bg-[#CCFF00]/20"
+            >
+              <Printer size={12} aria-hidden="true" />
+              Export PDF Summary
+            </button>
             <span className="border border-[#CCFF00]/50 bg-[#CCFF00]/10 px-2.5 py-1 text-[#CCFF00]">
-              0% Degradation
+              0% Degradation · 60-Year Life
             </span>
           </div>
         </div>
@@ -798,9 +947,14 @@ export default function FirmingCalculator() {
             <div className="border border-slate-800 bg-[#121824] p-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-base font-bold text-white">The 24-Hour Firming Look</h2>
+                  <h2 className="text-base font-bold text-white">
+                    {viewMode === 'day' ? 'The 24-Hour Firming Look' : 'The Winter Stress Week'}
+                  </h2>
                   <p className="text-xs text-slate-500">
-                    {preset.loadDescription} ·{' '}
+                    {viewMode === 'day'
+                      ? preset.loadDescription
+                      : 'Seven winter days including a three-day wind lull — where deep storage earns its keep'}{' '}
+                    ·{' '}
                     <span className="font-mono text-slate-400">
                       {fmtMW(storageMW)} / {fmtMWh(energyCapMWh)} store
                     </span>
@@ -812,11 +966,7 @@ export default function FirmingCalculator() {
                   <div className="flex items-stretch gap-2">
                     <div className="border border-slate-700 px-3 py-2 text-right">
                       <div className="font-mono text-2xl font-black leading-none text-slate-500">
-                        {(presetId === 'anglesey'
-                          ? sim.bareCoverage
-                          : sim.peakGridBefore
-                        ).toFixed(0)}
-                        %
+                        {kpiBefore.toFixed(0)}%
                       </div>
                       <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-600">
                         {presetId === 'anglesey' ? 'Green, No Storage' : 'Peak Grid Draw, No Storage'}
@@ -827,11 +977,7 @@ export default function FirmingCalculator() {
                     </div>
                     <div className="border border-[#CCFF00] bg-[#CCFF00]/10 px-4 py-2 text-right">
                       <div className="rhe-glow font-mono text-2xl font-black leading-none text-[#CCFF00]">
-                        {(presetId === 'anglesey'
-                          ? sim.firmingFactor
-                          : sim.peakGridAfter
-                        ).toFixed(0)}
-                        %
+                        {kpiAfter.toFixed(0)}%
                       </div>
                       <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">
                         With HD Hydro
@@ -842,8 +988,42 @@ export default function FirmingCalculator() {
                     {presetId === 'anglesey'
                       ? 'Green Firming Factor — your path to 100% continuous green power'
                       : 'Share of peak-window power bought from the grid at peak prices'}
+                    {viewMode === 'week' && ' (winter week)'}
                   </div>
                 </div>
+              </div>
+
+              {/* Day / winter week toggle */}
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('day')}
+                  aria-pressed={viewMode === 'day'}
+                  className={`flex items-center gap-1.5 border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                    viewMode === 'day'
+                      ? 'border-[#CCFF00] bg-[#CCFF00]/10 text-[#CCFF00]'
+                      : 'border-slate-700 text-slate-500 hover:border-slate-500'
+                  }`}
+                >
+                  <Clock size={12} aria-hidden="true" /> Typical Day
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('week')}
+                  aria-pressed={viewMode === 'week'}
+                  className={`flex items-center gap-1.5 border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                    viewMode === 'week'
+                      ? 'border-[#CCFF00] bg-[#CCFF00]/10 text-[#CCFF00]'
+                      : 'border-slate-700 text-slate-500 hover:border-slate-500'
+                  }`}
+                >
+                  <Snowflake size={12} aria-hidden="true" /> Winter Stress Week
+                </button>
+                {viewMode === 'week' && (
+                  <span className="text-[10px] text-slate-600">
+                    Days 4–5: wind drops to ~25% · solar at 35% seasonal output
+                  </span>
+                )}
               </div>
 
               <div className="h-72">
@@ -855,7 +1035,8 @@ export default function FirmingCalculator() {
                       tick={{ fill: '#64748B', fontSize: 10 }}
                       tickLine={false}
                       axisLine={{ stroke: '#334155' }}
-                      interval={3}
+                      interval={viewMode === 'day' ? 3 : 23}
+                      tickFormatter={(v) => (viewMode === 'week' ? v.replace(' 00:00', '') : v)}
                     />
                     <YAxis
                       tick={{ fill: '#64748B', fontSize: 10 }}
@@ -900,21 +1081,21 @@ export default function FirmingCalculator() {
                       dataKey="discharge"
                       fill={NEON}
                       fillOpacity={0.9}
-                      barSize={10}
+                      barSize={viewMode === 'day' ? 10 : 2}
                     />
                     <Bar
                       name="Storage Catching Excess"
                       dataKey="charge"
                       fill={NEON}
                       fillOpacity={0.3}
-                      barSize={10}
+                      barSize={viewMode === 'day' ? 10 : 2}
                     />
                     <Line
                       name="Your Demand"
                       dataKey="load"
                       type="stepAfter"
                       stroke="#F8FAFC"
-                      strokeWidth={2}
+                      strokeWidth={viewMode === 'day' ? 2 : 1.5}
                       dot={false}
                     />
                   </ComposedChart>
@@ -924,13 +1105,15 @@ export default function FirmingCalculator() {
                 Bright green blocks: the HD Hydro store deploying through generation
                 deficits. Dim green below the line: catching excess power that would
                 otherwise be curtailed.
+                {viewMode === 'week' &&
+                  ' Slide the duration up to watch the store ride further into the lull.'}
               </p>
               {presetId === 'anglesey' && sim.genCoverage > 0 && sim.genCoverage < 0.95 && (
                 <p className="mt-2 flex items-start gap-1.5 border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] leading-snug text-amber-400/90">
                   <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
-                  Your generation mix produces {(sim.genCoverage * 100).toFixed(0)}% of your
-                  daily energy need. Storage firms what you generate — add wind or solar
-                  capacity to raise the green ceiling.
+                  {viewMode === 'week'
+                    ? `In this winter week your generation produces ${(sim.genCoverage * 100).toFixed(0)}% of the energy you need — no store of any technology can bridge a multi-day lull alone. Deep duration extends the ride-through; extra generation closes the gap.`
+                    : `Your generation mix produces ${(sim.genCoverage * 100).toFixed(0)}% of your daily energy need. Storage firms what you generate — add wind or solar capacity to raise the green ceiling.`}
                 </p>
               )}
             </div>
@@ -1088,7 +1271,52 @@ export default function FirmingCalculator() {
               </div>
             </div>
 
-            {/* ---- 3. Cumulative cash cost ---- */}
+            {/* ---- 3. UK policy fit: LDES cap & floor ---- */}
+            <div
+              className={`flex flex-wrap items-center justify-between gap-3 border p-4 ${
+                capFloorEligible ? 'border-[#CCFF00]/60 bg-[#CCFF00]/5' : 'border-slate-700 bg-[#121824]'
+              }`}
+            >
+              <div className="flex items-start gap-3">
+                <BadgeCheck
+                  size={18}
+                  className={`mt-0.5 shrink-0 ${capFloorEligible ? 'text-[#CCFF00]' : 'text-slate-500'}`}
+                  aria-hidden="true"
+                />
+                <div>
+                  <div
+                    className={`text-sm font-black uppercase tracking-wide ${
+                      capFloorEligible ? 'text-[#CCFF00]' : 'text-slate-300'
+                    }`}
+                  >
+                    UK Policy Fit: Ofgem LDES Cap &amp; Floor
+                  </div>
+                  <p className="mt-0.5 max-w-2xl text-xs leading-relaxed text-slate-400">
+                    {capFloorEligible
+                      ? `Your ${durationHours}-hour design meets the scheme's 8-hour continuous-power threshold and can apply for 20–25 years of revenue-floor protection — de-risking financing at exactly the horizon where HD Hydro's economics dominate. (8-hour Lithium-ion also qualifies; HD Hydro differentiates on delivered cost at duration, zero-degradation capacity, and 35+ years of asset life after the scheme ends.)`
+                      : `At ${durationHours} hours your design is below the scheme's 8-hour continuous-power threshold. Extend the duration to qualify for 20–25 years of revenue-floor support.`}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setDurationHours(Math.max(8, durationHours))
+                  setYears(25)
+                }}
+                className={`shrink-0 border px-3 py-1.5 text-[11px] font-bold transition-colors ${
+                  capFloorEligible && years === 25
+                    ? 'border-slate-700 text-slate-600'
+                    : 'border-[#CCFF00]/60 bg-[#CCFF00]/10 text-[#CCFF00] hover:bg-[#CCFF00]/20'
+                }`}
+              >
+                {capFloorEligible && years === 25
+                  ? 'Framed for the scheme ✓'
+                  : 'Frame for the scheme: 8h+ / 25 yrs'}
+              </button>
+            </div>
+
+            {/* ---- 4. Cumulative cash cost ---- */}
             <div className="border border-slate-800 bg-[#121824] p-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -1171,7 +1399,7 @@ export default function FirmingCalculator() {
               </div>
             </div>
 
-            {/* ---- 4. Executive grid ---- */}
+            {/* ---- 5. Executive grid ---- */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {/* Investment case */}
               <div className="border border-slate-800 bg-[#121824] p-4">
@@ -1301,7 +1529,7 @@ export default function FirmingCalculator() {
               </div>
             </div>
 
-            {/* ---- 5. Straight talk: honest fit guide ---- */}
+            {/* ---- 6. Straight talk: honest fit guide ---- */}
             <div className="border border-slate-800 bg-[#121824] p-5">
               <div className="mb-3 flex items-center gap-2">
                 <Scale size={15} className="text-[#CCFF00]" aria-hidden="true" />
@@ -1362,7 +1590,7 @@ export default function FirmingCalculator() {
               </p>
             </div>
 
-            {/* ---- 6. Strategic advice banner ---- */}
+            {/* ---- 7. Strategic advice banner ---- */}
             <div
               className={`flex items-start gap-3 border p-4 ${
                 advice.tone === 'neutral'
@@ -1392,7 +1620,7 @@ export default function FirmingCalculator() {
               </div>
             </div>
 
-            {/* ---- 7. The bottom line: figures-backed close ---- */}
+            {/* ---- 8. The bottom line: figures-backed close ---- */}
             <div className="border-2 border-[#CCFF00] bg-[#CCFF00]/5 p-5">
               <div className="mb-1 flex items-center gap-2">
                 <Zap size={16} className="text-[#CCFF00]" aria-hidden="true" />
@@ -1404,10 +1632,10 @@ export default function FirmingCalculator() {
                 Your configuration: {fmtMW(storageMW)} / {fmtMWh(energyCapMWh)} store at{' '}
                 {preset.label}, evaluated over {years} years.
               </p>
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
                 <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
                   <div
-                    className={`rhe-glow font-mono text-2xl font-black ${
+                    className={`rhe-glow font-mono text-xl font-black ${
                       lifetimeSavings >= 0 ? 'text-[#CCFF00]' : 'text-amber-500'
                     }`}
                   >
@@ -1418,7 +1646,7 @@ export default function FirmingCalculator() {
                   </div>
                 </div>
                 <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
-                  <div className="rhe-glow font-mono text-2xl font-black text-[#CCFF00]">
+                  <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
                     {investment.irr !== null
                       ? `${(investment.irr * 100).toFixed(1)}%`
                       : `${Math.max(0, hdAdvantagePct).toFixed(0)}%`}
@@ -1430,23 +1658,31 @@ export default function FirmingCalculator() {
                   </div>
                 </div>
                 <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
-                  <div className="rhe-glow font-mono text-2xl font-black text-[#CCFF00]">
+                  <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
                     {presetId === 'anglesey'
-                      ? `+${(sim.firmingFactor - sim.bareCoverage).toFixed(0)}pts`
-                      : `−${(sim.peakGridBefore - sim.peakGridAfter).toFixed(0)}pts`}
+                      ? `+${(simDay.firmingFactor - simDay.bareCoverage).toFixed(0)}pts`
+                      : `−${(simDay.peakGridBefore - simDay.peakGridAfter).toFixed(0)}pts`}
                   </div>
                   <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                     {presetId === 'anglesey'
-                      ? `Continuous green power (${sim.bareCoverage.toFixed(0)}% → ${sim.firmingFactor.toFixed(0)}%)`
-                      : `Peak-price grid exposure (${sim.peakGridBefore.toFixed(0)}% → ${sim.peakGridAfter.toFixed(0)}%)`}
+                      ? `Continuous green power (${simDay.bareCoverage.toFixed(0)}% → ${simDay.firmingFactor.toFixed(0)}%)`
+                      : `Peak-price grid exposure (${simDay.peakGridBefore.toFixed(0)}% → ${simDay.peakGridAfter.toFixed(0)}%)`}
                   </div>
                 </div>
                 <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
-                  <div className="rhe-glow font-mono text-2xl font-black text-[#CCFF00]">
-                    {((sim.dailyGreenCharge * 365) / 1000).toFixed(1)} GWh
+                  <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
+                    {annualCurtailmentGWh.toFixed(1)} GWh
                   </div>
                   <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                     Surplus power captured per year, not curtailed
+                  </div>
+                </div>
+                <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
+                  <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
+                    {fmtTonnes(annualCO2Avoided)}
+                  </div>
+                  <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    CO₂e avoided each year vs gas-fired firming
                   </div>
                 </div>
               </div>
@@ -1469,7 +1705,7 @@ export default function FirmingCalculator() {
               </div>
             </div>
 
-            {/* ---- 8. Assumptions disclosure ---- */}
+            {/* ---- 9. Assumptions disclosure ---- */}
             <details className="group border border-slate-800 bg-[#121824]">
               <summary className="cursor-pointer select-none px-5 py-3 text-xs font-bold uppercase tracking-[0.15em] text-slate-400 transition-colors hover:text-slate-200">
                 Our Modelling Assumptions — open book
@@ -1489,12 +1725,12 @@ export default function FirmingCalculator() {
                   of energy capex.
                 </div>
                 <div>
-                  <div className="mb-1 font-bold text-slate-400">Shared &amp; Conventional</div>
-                  Conventional pumped hydro £1,500/kW + £90/kWh, 78% RTE, 80-year life,
-                  1%/yr O&amp;M · all technologies cycle 330× per year · your selected cost
-                  of capital ({discountPct}%) applied equally, financed over the shorter of
-                  asset life and your window · IRR &amp; cash chart undiscounted GBP, real
-                  terms.
+                  <div className="mb-1 font-bold text-slate-400">Shared &amp; Scenario</div>
+                  Conventional pumped hydro £1,500/kW + £90/kWh, 78% RTE, 80-year life, 1%/yr
+                  O&amp;M · 330 cycles/yr · your selected cost of capital ({discountPct}%)
+                  applied equally · CO₂e at {GAS_CO2_T_PER_MWH} t/MWh vs unabated gas firming ·
+                  winter week: 3-day wind lull at ~25% output, solar at 35% seasonal · IRR
+                  &amp; cash chart undiscounted GBP, real terms.
                 </div>
               </div>
             </details>
@@ -1507,5 +1743,155 @@ export default function FirmingCalculator() {
         </footer>
       </main>
     </div>
+
+    {/* ============ PRINT-ONLY ONE-PAGE SUMMARY ============ */}
+    <div className="hidden bg-white p-8 font-sans text-slate-900 print:block">
+      <div className="flex items-center justify-between border-b-4 border-[#9BC400] pb-3">
+        <div>
+          <div className="text-2xl font-black uppercase tracking-wider">
+            Rhe<span className="text-[#7A9E00]">Energise</span>
+          </div>
+          <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">
+            HD Hydro · Firming &amp; Storage Proposal Summary
+          </div>
+        </div>
+        <div className="text-right text-[11px] text-slate-500">
+          <div className="font-bold text-slate-700">{preset.label}</div>
+          <div>{new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+        </div>
+      </div>
+
+      <h2 className="mt-4 text-xs font-black uppercase tracking-wider text-slate-500">
+        Your Configuration
+      </h2>
+      <div className="mt-1 grid grid-cols-4 gap-2 text-[11px]">
+        {[
+          [preset.demandLabel, fmtMW(demandMW)],
+          ['Wind / Solar', `${fmtMW(windMW)} / ${fmtMW(solarMW)}`],
+          ['HD Hydro Store', `${fmtMW(storageMW)} · ${fmtMWh(energyCapMWh)}`],
+          ['Discharge Duration', `${durationHours} hours`],
+          ['Evaluation Window', `${years} years`],
+          ['Cost of Capital', `${discountPct}%`],
+          ['Li-ion Price Outlook', liOutlook.label],
+          [
+            'Ofgem LDES Cap & Floor',
+            capFloorEligible ? 'Meets 8h threshold — eligible to apply' : 'Below 8h threshold',
+          ],
+        ].map(([k, v]) => (
+          <div key={k} className="border border-slate-300 p-2">
+            <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500">{k}</div>
+            <div className="font-mono font-bold">{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <h2 className="mt-4 text-xs font-black uppercase tracking-wider text-slate-500">
+        The Outcome for You
+      </h2>
+      <div className="mt-1 grid grid-cols-3 gap-2 text-center">
+        <div className="border-2 border-[#9BC400] bg-[#F5FBE0] p-3">
+          <div className="font-mono text-2xl font-black text-[#5C7A00]">
+            {presetId === 'anglesey'
+              ? `${simDay.bareCoverage.toFixed(0)}% → ${simDay.firmingFactor.toFixed(0)}%`
+              : `${simDay.peakGridBefore.toFixed(0)}% → ${simDay.peakGridAfter.toFixed(0)}%`}
+          </div>
+          <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+            {presetId === 'anglesey'
+              ? 'Continuous green power, without → with HD Hydro'
+              : 'Peak-price grid draw, without → with HD Hydro'}
+          </div>
+        </div>
+        <div className="border-2 border-[#9BC400] bg-[#F5FBE0] p-3">
+          <div className="font-mono text-2xl font-black text-[#5C7A00]">
+            {fmtMillions(lifetimeSavings)}
+          </div>
+          <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+            Saved vs Lithium-ion over {years} years
+            {investment.irr !== null
+              ? ` · ${(investment.irr * 100).toFixed(1)}% IRR${investment.paybackYear !== null ? `, payback yr ${investment.paybackYear}` : ''}`
+              : ''}
+          </div>
+        </div>
+        <div className="border-2 border-[#9BC400] bg-[#F5FBE0] p-3">
+          <div className="font-mono text-2xl font-black text-[#5C7A00]">
+            {fmtTonnes(annualCO2Avoided)}
+          </div>
+          <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+            CO₂e avoided per year vs gas-fired firming
+          </div>
+        </div>
+      </div>
+
+      <h2 className="mt-4 text-xs font-black uppercase tracking-wider text-slate-500">
+        Levelized Cost of Storage at Your Design
+      </h2>
+      <table className="mt-1 w-full border-collapse text-[11px]">
+        <thead>
+          <tr className="border-b-2 border-slate-400 text-left">
+            <th className="py-1 pr-2">Technology</th>
+            <th className="py-1 pr-2">LCOS</th>
+            <th className="py-1 pr-2">Asset life</th>
+            <th className="py-1 pr-2">Degradation</th>
+            <th className="py-1">Re-investment over {years} yrs</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr className="border-b border-slate-200 bg-[#F5FBE0] font-bold">
+            <td className="py-1 pr-2">RheEnergise HD Hydro</td>
+            <td className="py-1 pr-2 font-mono">{fmtPerMWh(lcos.hdHydro)}</td>
+            <td className="py-1 pr-2">60 years</td>
+            <td className="py-1 pr-2">0%</td>
+            <td className="py-1 font-mono">£0</td>
+          </tr>
+          <tr className="border-b border-slate-200">
+            <td className="py-1 pr-2">Lithium-ion BESS</td>
+            <td className="py-1 pr-2 font-mono">{fmtPerMWh(lcos.lithium)}</td>
+            <td className="py-1 pr-2">~15–20 years</td>
+            <td className="py-1 pr-2">−2% per year</td>
+            <td className="py-1 font-mono">{fmtMillions(reinvestmentLiability)}</td>
+          </tr>
+          <tr>
+            <td className="py-1 pr-2">Conventional Pumped Hydro</td>
+            <td className="py-1 pr-2 font-mono">{fmtPerMWh(lcos.convHydro)}</td>
+            <td className="py-1 pr-2">80 years</td>
+            <td className="py-1 pr-2">0%</td>
+            <td className="py-1">Requires 300m+ mountain site</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2 className="mt-4 text-xs font-black uppercase tracking-wider text-slate-500">
+        Why HD Hydro Here
+      </h2>
+      <ul className="mt-1 list-disc space-y-1 pl-5 text-[11px] leading-snug">
+        <li>
+          One build, 60 years of zero-degradation service — the capacity contracted in year
+          1 is the capacity held in year 60.
+        </li>
+        <li>
+          {annualCurtailmentGWh.toFixed(1)} GWh of surplus renewable power captured each
+          year instead of curtailed.
+        </li>
+        <li>
+          Adding hours means bigger tanks and more R-19 fluid (2.5× denser than water) —
+          not more battery cells: 60% smaller footprint than conventional hydro, sited on
+          100&nbsp;m hills, not 300&nbsp;m+ mountains.
+        </li>
+        <li>
+          Zero exposure to battery cell prices and supply chains; costs are steel, civils
+          and fluid.
+        </li>
+      </ul>
+
+      <p className="mt-4 border-t border-slate-300 pt-2 text-[9px] leading-snug text-slate-500">
+        Indicative modelling for commercial discussion — not a binding quotation. GBP, real
+        terms. Assumptions: HD Hydro £850/kW + £125/kWh, 80% RTE, 1.5%/yr O&amp;M, year-30
+        refurbishment provision · Li-ion £80/kW + £170/kWh ({liOutlook.label.toLowerCase()}),
+        85% RTE −2%/yr, augmentation every ~11 yrs at 30% of energy capex · 330 cycles/yr ·
+        {discountPct}% cost of capital · CO₂e at {GAS_CO2_T_PER_MWH} t/MWh vs unabated gas
+        firming. Scenario link: {scenarioLink}
+      </p>
+    </div>
+    </>
   )
 }
