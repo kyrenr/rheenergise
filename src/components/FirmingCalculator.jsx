@@ -15,16 +15,20 @@ import {
 } from 'recharts'
 import {
   AlertTriangle,
+  ArrowRight,
   BatteryCharging,
   CalendarRange,
+  CircleCheck,
   Clock,
   Factory,
+  Gauge,
   Landmark,
   Leaf,
   MapPin,
   Mountain,
   PiggyBank,
   RefreshCcw,
+  Scale,
   ShieldCheck,
   Sun,
   Wind,
@@ -43,29 +47,30 @@ const SOLAR_YELLOW = '#FDE047'
 
 /* ------------------------------------------------------------------ */
 /*  CLIENT-FACING DATA ENGINE                                          */
+/*  Calibrated to late-2025/26 market evidence — see the assumptions   */
+/*  panel rendered at the bottom of the page.                          */
 /* ------------------------------------------------------------------ */
 
-// Technology cost & physics assumptions (transparent, linear inputs).
 const TECH = {
   hdHydro: {
     name: 'RheEnergise HD Hydro',
     powerCapexPerKW: 850, // £/kW — pump-turbines, R-19 loop
     energyCapexPerKWh: 125, // £/kWh — 60% smaller tanks & pipes vs water
     fixedOMRate: 0.015, // % of capex per year
-    rte: 0.83, // round-trip efficiency, flat for life
+    rte: 0.8, // round-trip efficiency, flat for life
     lifeYears: 60,
-    degradationPerYear: 0, // zero performance loss
+    refurbYear: 30, // machinery refurbishment provision
+    refurbCostShare: 0.15, // of initial capex, once, if window exceeds it
   },
   lithium: {
     name: 'Lithium-ion BESS',
-    powerCapexPerKW: 100,
-    energyCapexPerKWh: 230,
+    powerCapexPerKW: 80,
+    energyCapexPerKWh: 170, // current European installed pricing
     fixedOMRate: 0.02,
     rte: 0.85, // starting RTE — degrades ~2%/yr
-    lifeYears: 15, // cell stack life without augmentation
-    degradationPerYear: 0.02,
+    lifeYears: 20, // typical merchant financing horizon
     augmentationIntervalYears: 11, // stack replacement every 10–12 yrs
-    augmentationCostShare: 0.35, // of initial energy capex, per event
+    augmentationCostShare: 0.3, // of initial energy capex, per event
     avgCapacityFactor: 0.9, // average usable capacity between augmentations
   },
   convHydro: {
@@ -75,12 +80,18 @@ const TECH = {
     fixedOMRate: 0.01,
     rte: 0.78,
     lifeYears: 80,
-    degradationPerYear: 0,
   },
 }
 
 const CYCLES_PER_YEAR = 330 // one full cycle per day with maintenance margin
 const DISCOUNT_RATE = 0.07
+
+// Sensitivity: where do Lithium-ion prices go from here?
+const LI_OUTLOOKS = [
+  { id: 'flat', label: 'Today’s prices', factor: 1 },
+  { id: 'down25', label: 'Fall 25%', factor: 0.75 },
+  { id: 'down50', label: 'Fall 50%', factor: 0.5 },
+]
 
 // Capital recovery factor — turns upfront capex into a flat annual payment.
 function crf(rate, years) {
@@ -89,35 +100,37 @@ function crf(rate, years) {
 }
 
 function lithiumAugmentations(years) {
-  const t = TECH.lithium
-  return Math.floor(Math.max(0, years - 1) / t.augmentationIntervalYears)
+  return Math.floor(Math.max(0, years - 1) / TECH.lithium.augmentationIntervalYears)
 }
 
 /**
  * Levelized Cost of Storage (£/MWh discharged).
- * Annual cost = financed capex + fixed O&M + (Li-ion only) stack augmentation,
+ * Annual cost = financed capex + fixed O&M + technology-specific lifecycle
+ * spend (Li-ion stack augmentation; HD Hydro mid-life refurbishment),
  * divided by the energy actually delivered each year.
  */
-function calcLcos(techKey, powerMW, durationHours, years) {
+function calcLcos(techKey, powerMW, durationHours, years, liPriceFactor = 1) {
   const t = TECH[techKey]
   const energyMWh = powerMW * durationHours
-  const capex = powerMW * 1000 * t.powerCapexPerKW + energyMWh * 1000 * t.energyCapexPerKWh
+  const energyRate =
+    techKey === 'lithium' ? t.energyCapexPerKWh * liPriceFactor : t.energyCapexPerKWh
+  const capex = powerMW * 1000 * t.powerCapexPerKW + energyMWh * 1000 * energyRate
   const financeTerm = Math.min(years, t.lifeYears)
-  const annualCapex = capex * crf(DISCOUNT_RATE, financeTerm)
-  const annualOM = capex * t.fixedOMRate
+  let annualCost = capex * crf(DISCOUNT_RATE, financeTerm) + capex * t.fixedOMRate
 
-  let annualAugmentation = 0
   let capacityFactor = 1
   if (techKey === 'lithium') {
     const augs = lithiumAugmentations(years)
-    const energyCapex = energyMWh * 1000 * t.energyCapexPerKWh
-    annualAugmentation = (augs * t.augmentationCostShare * energyCapex) / years
+    annualCost += (augs * t.augmentationCostShare * energyMWh * 1000 * energyRate) / years
     capacityFactor = t.avgCapacityFactor
+  }
+  if (techKey === 'hdHydro' && years > t.refurbYear) {
+    annualCost += (t.refurbCostShare * capex) / years
   }
 
   const annualDischargeMWh = CYCLES_PER_YEAR * energyMWh * t.rte * capacityFactor
   if (annualDischargeMWh <= 0) return 0
-  return (annualCapex + annualOM + annualAugmentation) / annualDischargeMWh
+  return annualCost / annualDischargeMWh
 }
 
 /* ------------------------------------------------------------------ */
@@ -132,6 +145,9 @@ const PRESETS = {
     icon: MapPin,
     defaultWindMW: 120,
     defaultSolarMW: 40,
+    defaultDemandMW: 50,
+    demandLabel: 'Contracted Firm Block',
+    demandSublabel: 'The 24/7 green block you sell to your offtaker',
     windCapacityFactor: 0.42, // high coastal wind
     solarPeakShare: 0.75,
     // Gusty coastal profile — big overnight & evening spikes, deep midday lull.
@@ -148,7 +164,10 @@ const PRESETS = {
     tagline: 'Virtual PPA · grid-connected factory firming',
     icon: Factory,
     defaultWindMW: 40,
-    defaultSolarMW: 80,
+    defaultSolarMW: 60,
+    defaultDemandMW: 70,
+    demandLabel: 'Factory Peak Demand',
+    demandSublabel: 'Your site’s maximum draw during day shifts',
     windCapacityFactor: 0.33, // steadier inland wind
     solarPeakShare: 0.72,
     windShape: [
@@ -177,10 +196,12 @@ function solarShape(h, peakShare) {
 
 /* ------------------------------------------------------------------ */
 /*  24-HOUR FIRMING SIMULATION                                         */
+/*  The store is rated to carry the customer's full contracted demand. */
 /* ------------------------------------------------------------------ */
 
-function simulateDay(preset, windMW, solarMW, storagePowerMW, durationHours) {
-  const oneWayEff = Math.sqrt(TECH.hdHydro.rte) // 83% RTE split across charge/discharge
+function simulateDay(preset, windMW, solarMW, demandMW, durationHours) {
+  const storagePowerMW = demandMW
+  const oneWayEff = Math.sqrt(TECH.hdHydro.rte) // 80% RTE split across charge/discharge
   const energyCapMWh = storagePowerMW * durationHours
 
   const shapeAvg = preset.windShape.reduce((a, b) => a + b, 0) / 24
@@ -189,18 +210,13 @@ function simulateDay(preset, windMW, solarMW, storagePowerMW, durationHours) {
   )
   const solar = HOURS.map((h) => solarMW * solarShape(h, preset.solarPeakShare))
   const gen = HOURS.map((h) => wind[h] + solar[h])
-  const avgGen = gen.reduce((a, b) => a + b, 0) / 24
 
-  let load
-  if (preset.id === 'anglesey') {
-    // Firm, flat export block — the product the offtaker is buying.
-    // Target: the site's full average output, around the clock — so store
-    // size and round-trip losses genuinely determine how firm the block is.
-    load = HOURS.map(() => avgGen)
-  } else {
-    const peakMW = Math.max(avgGen * 1.05, storagePowerMW * 1.1)
-    load = INDUSTRIAL_SHAPE.map((s) => s * peakMW)
-  }
+  // Customer demand: a flat contracted block (Anglesey) or the factory's
+  // day-shift profile scaled to its peak (Deeside).
+  const load =
+    preset.id === 'anglesey'
+      ? HOURS.map(() => demandMW)
+      : INDUSTRIAL_SHAPE.map((s) => s * demandMW)
 
   // Repeat identical days until the state of charge reaches a cyclic steady
   // state (start-of-day SoC stops moving), then report that settled day.
@@ -272,10 +288,33 @@ function simulateDay(preset, windMW, solarMW, storagePowerMW, durationHours) {
   const totalIn = greenIn + gridIn
   const greenShare = totalIn > 0 ? greenIn / totalIn : 1
   const totalLoad = day.reduce((a, r) => a + r.load, 0)
+  const totalGen = day.reduce((a, r) => a + r.wind + r.solar, 0)
+  const directServed = day.reduce((a, r) => a + r.direct, 0)
   const greenServed = day.reduce((a, r) => a + r.direct + r.discharge * greenShare, 0)
   const firmingFactor = totalLoad > 0 ? Math.min(100, (greenServed / totalLoad) * 100) : 0
+  const bareCoverage = totalLoad > 0 ? Math.min(100, (directServed / totalLoad) * 100) : 0
+  const genCoverage = totalLoad > 0 ? totalGen / totalLoad : 0
 
-  return { day, firmingFactor, avgGen, energyCapMWh }
+  // Factory KPI (Deeside): share of peak-window (07:00–18:00) power that must
+  // be bought from the grid at peak prices, before vs after storage.
+  const peak = day.filter((r) => r.hour >= 7 && r.hour <= 18)
+  const peakLoad = peak.reduce((a, r) => a + r.load, 0)
+  const peakDirect = peak.reduce((a, r) => a + r.direct, 0)
+  const peakDischarge = peak.reduce((a, r) => a + r.discharge, 0)
+  const peakGridBefore = peakLoad > 0 ? ((peakLoad - peakDirect) / peakLoad) * 100 : 0
+  const peakGridAfter =
+    peakLoad > 0 ? (Math.max(0, peakLoad - peakDirect - peakDischarge) / peakLoad) * 100 : 0
+
+  return {
+    day,
+    firmingFactor,
+    bareCoverage,
+    genCoverage,
+    peakGridBefore,
+    peakGridAfter,
+    energyCapMWh,
+    storagePowerMW,
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -369,33 +408,37 @@ export default function FirmingCalculator() {
   const [presetId, setPresetId] = useState('anglesey')
   const [windMW, setWindMW] = useState(PRESETS.anglesey.defaultWindMW)
   const [solarMW, setSolarMW] = useState(PRESETS.anglesey.defaultSolarMW)
+  const [demandMW, setDemandMW] = useState(PRESETS.anglesey.defaultDemandMW)
   const [durationHours, setDurationHours] = useState(8)
   const [years, setYears] = useState(25)
+  const [liOutlookId, setLiOutlookId] = useState('flat')
 
   const preset = PRESETS[presetId]
+  const liOutlook = LI_OUTLOOKS.find((o) => o.id === liOutlookId)
 
   const selectPreset = (id) => {
     setPresetId(id)
     setWindMW(PRESETS[id].defaultWindMW)
     setSolarMW(PRESETS[id].defaultSolarMW)
+    setDemandMW(PRESETS[id].defaultDemandMW)
   }
 
-  // Storage sized to firm the generation mix (floor of 10 MW).
-  const storagePowerMW = Math.max(10, Math.round((windMW + solarMW) * 0.35))
+  // The store is rated to carry the customer's full contracted demand.
+  const storagePowerMW = demandMW
   const energyCapMWh = storagePowerMW * durationHours
 
   const sim = useMemo(
-    () => simulateDay(preset, windMW, solarMW, storagePowerMW, durationHours),
-    [preset, windMW, solarMW, storagePowerMW, durationHours],
+    () => simulateDay(preset, windMW, solarMW, demandMW, durationHours),
+    [preset, windMW, solarMW, demandMW, durationHours],
   )
 
   const lcos = useMemo(
     () => ({
       hdHydro: calcLcos('hdHydro', storagePowerMW, durationHours, years),
-      lithium: calcLcos('lithium', storagePowerMW, durationHours, years),
+      lithium: calcLcos('lithium', storagePowerMW, durationHours, years, liOutlook.factor),
       convHydro: calcLcos('convHydro', storagePowerMW, durationHours, years),
     }),
-    [storagePowerMW, durationHours, years],
+    [storagePowerMW, durationHours, years, liOutlook],
   )
 
   const lcosCurve = useMemo(
@@ -403,10 +446,10 @@ export default function FirmingCalculator() {
       [4, 6, 8, 10, 12, 14, 16].map((d) => ({
         duration: d,
         hdHydro: calcLcos('hdHydro', storagePowerMW, d, years),
-        lithium: calcLcos('lithium', storagePowerMW, d, years),
+        lithium: calcLcos('lithium', storagePowerMW, d, years, liOutlook.factor),
         convHydro: calcLcos('convHydro', storagePowerMW, d, years),
       })),
-    [storagePowerMW, years],
+    [storagePowerMW, years, liOutlook],
   )
 
   // Executive metrics ------------------------------------------------
@@ -418,7 +461,8 @@ export default function FirmingCalculator() {
     TECH.lithium.augmentationCostShare *
     energyCapMWh *
     1000 *
-    TECH.lithium.energyCapexPerKWh
+    TECH.lithium.energyCapexPerKWh *
+    liOutlook.factor
   const hdAdvantagePct =
     lcos.lithium > 0 ? ((lcos.lithium - lcos.hdHydro) / lcos.lithium) * 100 : 0
 
@@ -426,14 +470,14 @@ export default function FirmingCalculator() {
     durationHours <= 5
       ? {
           tone: 'neutral',
-          title: 'Short-Duration Matching',
-          body: 'Lithium-ion remains highly effective for immediate, rapid-frequency grid response. RheEnergise begins hitting parity.',
+          title: 'Short-Duration: Lithium-ion Territory',
+          body: 'At this duration Lithium-ion is the right tool — fast, proven and cheapest for rapid grid response. The HD Hydro case opens from around 6 hours; drag the duration slider to see where the economics pivot.',
         }
       : durationHours <= 9
         ? {
             tone: 'positive',
             title: 'The LDES Pivot',
-            body: 'RheEnergise HD Hydro eliminates the multi-million pound battery degradation liabilities, making it the perfect match for stable corporate PPAs.',
+            body: 'From here, adding hours means bigger tanks and more R-19 fluid — not more battery cells. HD Hydro removes degradation and stack-replacement liabilities from your cost line, the right match for stable corporate PPAs.',
           }
         : {
             tone: 'dominant',
@@ -461,7 +505,7 @@ export default function FirmingCalculator() {
           </div>
           <div className="flex items-center gap-2 text-[11px] font-semibold">
             <span className="border border-slate-700 px-2.5 py-1 text-slate-400">
-              83% Round-Trip Efficiency
+              80% Round-Trip Efficiency
             </span>
             <span className="border border-slate-700 px-2.5 py-1 text-slate-400">
               60-Year Asset Life
@@ -480,7 +524,7 @@ export default function FirmingCalculator() {
             <div className="border border-slate-800 bg-[#121824] p-5">
               <h2 className="mb-1 text-base font-bold text-white">Design Your System</h2>
               <p className="mb-5 text-xs text-slate-500">
-                Three choices. Live economics on the right.
+                Start with what you need to power. Live economics on the right.
               </p>
 
               {/* Location */}
@@ -519,8 +563,24 @@ export default function FirmingCalculator() {
                 })}
               </div>
 
+              {/* Customer power need */}
+              <PanelTitle step="2" title="Your Power Need" />
+              <div className="mb-6">
+                <Slider
+                  icon={Gauge}
+                  label={preset.demandLabel}
+                  sublabel={preset.demandSublabel}
+                  value={demandMW}
+                  min={10}
+                  max={150}
+                  step={5}
+                  unit={fmtMW}
+                  onChange={setDemandMW}
+                />
+              </div>
+
               {/* Generation mix */}
-              <PanelTitle step="2" title="Your Generation Mix" />
+              <PanelTitle step="3" title="Your Generation Mix" />
               <div className="mb-6 space-y-5">
                 <Slider
                   icon={Wind}
@@ -547,7 +607,7 @@ export default function FirmingCalculator() {
               </div>
 
               {/* Storage needs */}
-              <PanelTitle step="3" title="Your Storage Needs" />
+              <PanelTitle step="4" title="Your Storage Needs" />
               <div className="space-y-5">
                 <Slider
                   icon={Clock}
@@ -597,8 +657,9 @@ export default function FirmingCalculator() {
                   </div>
                 </div>
                 <p className="mt-2 text-[11px] leading-snug text-slate-500">
-                  R-19 fluid is 2.5× denser than water — the same energy in 60% smaller
-                  pipes and tanks, unlocked by a hill of just 100&nbsp;m.
+                  Rated to carry your full {fmtMW(demandMW)} demand for {durationHours} hours
+                  on its own. R-19 fluid is 2.5× denser than water — the same energy in 60%
+                  smaller pipes and tanks, unlocked by a hill of just 100&nbsp;m.
                 </p>
               </div>
             </div>
@@ -613,12 +674,42 @@ export default function FirmingCalculator() {
                   <h2 className="text-base font-bold text-white">The 24-Hour Firming Look</h2>
                   <p className="text-xs text-slate-500">{preset.loadDescription}</p>
                 </div>
-                <div className="border border-[#CCFF00] bg-[#CCFF00]/10 px-4 py-2 text-right">
-                  <div className="rhe-glow font-mono text-2xl font-black leading-none text-[#CCFF00]">
-                    {sim.firmingFactor.toFixed(0)}%
+                {/* Before / after in the customer's own KPI: green firming for
+                    the export hub, peak-price exposure for the factory */}
+                <div>
+                  <div className="flex items-stretch gap-2">
+                    <div className="border border-slate-700 px-3 py-2 text-right">
+                      <div className="font-mono text-2xl font-black leading-none text-slate-500">
+                        {(presetId === 'anglesey'
+                          ? sim.bareCoverage
+                          : sim.peakGridBefore
+                        ).toFixed(0)}
+                        %
+                      </div>
+                      <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-600">
+                        {presetId === 'anglesey' ? 'Green, No Storage' : 'Peak Grid Draw, No Storage'}
+                      </div>
+                    </div>
+                    <div className="flex items-center text-slate-500" aria-hidden="true">
+                      <ArrowRight size={18} />
+                    </div>
+                    <div className="border border-[#CCFF00] bg-[#CCFF00]/10 px-4 py-2 text-right">
+                      <div className="rhe-glow font-mono text-2xl font-black leading-none text-[#CCFF00]">
+                        {(presetId === 'anglesey'
+                          ? sim.firmingFactor
+                          : sim.peakGridAfter
+                        ).toFixed(0)}
+                        %
+                      </div>
+                      <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">
+                        With HD Hydro
+                      </div>
+                    </div>
                   </div>
-                  <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">
-                    Green Firming Factor
+                  <div className="mt-1 text-right text-[10px] text-slate-600">
+                    {presetId === 'anglesey'
+                      ? 'Green Firming Factor — your path to 100% continuous green power'
+                      : 'Share of peak-window power bought from the grid at peak prices'}
                   </div>
                 </div>
               </div>
@@ -687,7 +778,7 @@ export default function FirmingCalculator() {
                       barSize={10}
                     />
                     <Line
-                      name="Contracted Load"
+                      name="Your Demand"
                       dataKey="load"
                       type="stepAfter"
                       stroke="#F8FAFC"
@@ -702,11 +793,19 @@ export default function FirmingCalculator() {
                 deficits. Dim green below the line: catching excess power that would
                 otherwise be curtailed.
               </p>
+              {presetId === 'anglesey' && sim.genCoverage > 0 && sim.genCoverage < 0.95 && (
+                <p className="mt-2 flex items-start gap-1.5 border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] leading-snug text-amber-400/90">
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
+                  Your generation mix produces {(sim.genCoverage * 100).toFixed(0)}% of your
+                  daily energy need. Storage firms what you generate — add wind or solar
+                  capacity to raise the green ceiling.
+                </p>
+              )}
             </div>
 
             {/* ---- 2. Financial profile ---- */}
             <div className="border border-slate-800 bg-[#121824] p-5">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-base font-bold text-white">
                     Levelized Cost of Storage (LCOS)
@@ -716,11 +815,40 @@ export default function FirmingCalculator() {
                     {years}-year window
                   </p>
                 </div>
-                {hdAdvantagePct > 0 && (
+                {hdAdvantagePct >= 1 ? (
                   <div className="border border-[#CCFF00]/50 bg-[#CCFF00]/10 px-3 py-1.5 text-xs font-bold text-[#CCFF00]">
                     HD Hydro {hdAdvantagePct.toFixed(0)}% below Lithium-ion at your design
                   </div>
+                ) : (
+                  <div className="border border-amber-500/40 bg-amber-500/5 px-3 py-1.5 text-xs font-bold text-amber-500">
+                    Lithium-ion leads at this design — extend duration or window
+                  </div>
                 )}
+              </div>
+
+              {/* Honest sensitivity: where do Li-ion prices go? */}
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Lithium-ion price outlook:
+                </span>
+                {LI_OUTLOOKS.map((o) => (
+                  <button
+                    key={o.id}
+                    type="button"
+                    onClick={() => setLiOutlookId(o.id)}
+                    aria-pressed={o.id === liOutlookId}
+                    className={`border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                      o.id === liOutlookId
+                        ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                        : 'border-slate-700 text-slate-500 hover:border-slate-500'
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+                <span className="text-[10px] text-slate-600">
+                  We model the competition at its best — pick the future you believe in.
+                </span>
               </div>
 
               <div className="h-64">
@@ -894,9 +1022,7 @@ export default function FirmingCalculator() {
                     aria-hidden="true"
                   />
                   {augmentations > 0
-                    ? `Lithium-ion needs ${augmentations} battery stack replacement${
-                        augmentations > 1 ? 's' : ''
-                      } over ${years} years to keep delivering contract capacity.`
+                    ? `Budgeted stack replacement${augmentations > 1 ? 's' : ''} (${augmentations}×) to keep Lithium-ion at contract capacity over ${years} years — a planned cost in any honest BESS model, and a line item HD Hydro simply doesn't have.`
                     : 'Within ~10 years Li-ion avoids replacement — but degrades ~2% every year regardless.'}
                 </p>
               </div>
@@ -905,15 +1031,23 @@ export default function FirmingCalculator() {
               <div className="border border-slate-800 bg-[#121824] p-4">
                 <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">
                   <ShieldCheck size={14} className="text-[#CCFF00]" aria-hidden="true" />
-                  Deployment Feasibility Score
+                  Deployment Reality
                 </div>
                 <div className="space-y-1.5 text-xs">
                   <div className="flex items-center justify-between gap-2 border border-[#CCFF00]/40 bg-[#CCFF00]/10 px-2.5 py-1.5">
                     <span className="flex items-center gap-1.5 font-bold text-[#CCFF00]">
-                      <Landmark size={13} aria-hidden="true" /> RheEnergise HD Hydro
+                      <Landmark size={13} aria-hidden="true" /> HD Hydro
                     </span>
                     <span className="font-mono font-bold text-[#CCFF00]">
-                      Hill-Compatible · Low Risk
+                      100m hills · ~2–3 yr build
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 border border-slate-700 px-2.5 py-1.5">
+                    <span className="flex items-center gap-1.5 text-slate-400">
+                      <BatteryCharging size={13} aria-hidden="true" /> Lithium-ion
+                    </span>
+                    <span className="font-mono text-slate-400">
+                      Anywhere · ~1–2 yr build
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-2 border border-slate-700 px-2.5 py-1.5">
@@ -921,18 +1055,79 @@ export default function FirmingCalculator() {
                       <Mountain size={13} aria-hidden="true" /> Conventional Hydro
                     </span>
                     <span className="font-mono text-slate-500">
-                      Locked by Mountains · High Risk
+                      300m+ mountains · 8+ yrs
                     </span>
                   </div>
                 </div>
                 <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
-                  HD Hydro needs just 100&nbsp;m of vertical head — small North Wales
-                  hillsides, not 300&nbsp;m+ mountain ranges.
+                  HD Hydro opens an order of magnitude more UK sites than mountain-locked
+                  pumped hydro — small North Wales hillsides, not ranges.
                 </p>
               </div>
             </div>
 
-            {/* ---- 4. Strategic advice banner ---- */}
+            {/* ---- 4. Straight talk: honest fit guide ---- */}
+            <div className="border border-slate-800 bg-[#121824] p-5">
+              <div className="mb-3 flex items-center gap-2">
+                <Scale size={15} className="text-[#CCFF00]" aria-hidden="true" />
+                <h2 className="text-sm font-bold uppercase tracking-wide text-white">
+                  Straight Talk — Pick the Right Tool
+                </h2>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="border border-slate-700 p-3">
+                  <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    Where Lithium-ion is the right call
+                  </div>
+                  <ul className="space-y-1.5 text-[11px] leading-snug text-slate-500">
+                    {[
+                      'Durations of ~6 hours or less',
+                      'Power needed on-grid within ~24 months',
+                      'Revenue built on rapid frequency response',
+                      'Small or urban sites with no usable hill',
+                    ].map((item) => (
+                      <li key={item} className="flex items-start gap-1.5">
+                        <CircleCheck
+                          size={12}
+                          className="mt-0.5 shrink-0 text-slate-500"
+                          aria-hidden="true"
+                        />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="border border-[#CCFF00]/40 bg-[#CCFF00]/5 p-3">
+                  <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[#CCFF00]">
+                    Where HD Hydro is the right call
+                  </div>
+                  <ul className="space-y-1.5 text-[11px] leading-snug text-slate-400">
+                    {[
+                      'Firming for 8+ hours, day after day',
+                      'Contracts and horizons of 20+ years',
+                      'Zero-degradation contracted capacity',
+                      'A hedge against cell-price & supply-chain risk',
+                    ].map((item) => (
+                      <li key={item} className="flex items-start gap-1.5">
+                        <CircleCheck
+                          size={12}
+                          className="mt-0.5 shrink-0 text-[#CCFF00]"
+                          aria-hidden="true"
+                        />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+              <p className="mt-3 text-[11px] leading-snug text-slate-500">
+                The strongest portfolios use both: a fast battery for power services,
+                co-located with HD Hydro for deep, zero-degradation energy. We're happy to
+                design the hybrid.
+              </p>
+            </div>
+
+            {/* ---- 5. Strategic advice banner ---- */}
             <div
               className={`flex items-start gap-3 border p-4 ${
                 advice.tone === 'neutral'
@@ -961,6 +1156,34 @@ export default function FirmingCalculator() {
                 <p className="mt-0.5 text-xs leading-relaxed text-slate-400">{advice.body}</p>
               </div>
             </div>
+
+            {/* ---- 6. Assumptions disclosure ---- */}
+            <details className="group border border-slate-800 bg-[#121824]">
+              <summary className="cursor-pointer select-none px-5 py-3 text-xs font-bold uppercase tracking-[0.15em] text-slate-400 transition-colors hover:text-slate-200">
+                Our Modelling Assumptions — open book
+              </summary>
+              <div className="grid grid-cols-1 gap-4 border-t border-slate-800 p-5 text-[11px] leading-relaxed text-slate-500 sm:grid-cols-3">
+                <div>
+                  <div className="mb-1 font-bold text-[#CCFF00]">RheEnergise HD Hydro</div>
+                  £850/kW + £125/kWh installed (target cost) · 80% round-trip efficiency ·
+                  60-year life, 0% degradation · 1.5%/yr O&amp;M · 15% machinery
+                  refurbishment provision at year 30.
+                </div>
+                <div>
+                  <div className="mb-1 font-bold text-amber-500">Lithium-ion BESS</div>
+                  £80/kW + £170/kWh installed (current European pricing, adjustable with the
+                  outlook toggle) · 85% round-trip efficiency, −2%/yr degradation (90% average
+                  usable) · financed over 20 years · stack augmentation every ~11 years at 30%
+                  of energy capex.
+                </div>
+                <div>
+                  <div className="mb-1 font-bold text-slate-400">Shared &amp; Conventional</div>
+                  Conventional pumped hydro £1,500/kW + £90/kWh, 78% RTE, 80-year life,
+                  1%/yr O&amp;M · all technologies cycle 330× per year · 7% discount rate,
+                  financed over the shorter of asset life and your window · GBP, real terms.
+                </div>
+              </div>
+            </details>
           </section>
         </div>
 
