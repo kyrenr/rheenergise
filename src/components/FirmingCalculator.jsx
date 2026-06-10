@@ -32,13 +32,13 @@ import {
   PiggyBank,
   Printer,
   RefreshCcw,
+  RotateCcw,
   Scale,
   ShieldCheck,
   Snowflake,
   Sun,
   TrendingUp,
   Wind,
-  Zap,
 } from 'lucide-react'
 
 /* ------------------------------------------------------------------ */
@@ -50,6 +50,32 @@ const STEEL = '#64748B'
 const AMBER = '#F59E0B'
 const SKY = '#38BDF8'
 const SOLAR_YELLOW = '#FDE047'
+
+/** The RheEnergise blob mark — "Rhe" inside the four-lobed clover. */
+function RheBlobMark({ blob, text, size = 40 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden="true">
+      <g fill={blob}>
+        <circle cx="50" cy="50" r="32" />
+        <circle cx="50" cy="27" r="23" />
+        <circle cx="50" cy="73" r="23" />
+        <circle cx="27" cy="50" r="23" />
+        <circle cx="73" cy="50" r="23" />
+      </g>
+      <text
+        x="50"
+        y="61"
+        textAnchor="middle"
+        fontFamily="inherit"
+        fontWeight="800"
+        fontSize="32"
+        fill={text}
+      >
+        Rhe
+      </text>
+    </svg>
+  )
+}
 
 /* ------------------------------------------------------------------ */
 /*  CLIENT-FACING DATA ENGINE                                          */
@@ -447,8 +473,16 @@ function runStorageSim(preset, profiles, storagePowerMW, durationHours) {
 /*  FORMATTING                                                         */
 /* ------------------------------------------------------------------ */
 
-const fmtMW = (v) => `${Math.round(v).toLocaleString('en-GB')} MW`
-const fmtMWh = (v) => `${Math.round(v).toLocaleString('en-GB')} MWh`
+const fmtMW = (v) =>
+  v >= 1000
+    ? `${(v / 1000).toFixed(v % 1000 === 0 ? 0 : 1)} GW`
+    : `${Math.round(v).toLocaleString('en-GB')} MW`
+
+const fmtMWh = (v) =>
+  v >= 1000
+    ? `${(v / 1000).toFixed(v % 1000 === 0 ? 0 : 1)} GWh`
+    : `${Math.round(v).toLocaleString('en-GB')} MWh`
+
 const fmtPerMWh = (v) => `£${Math.round(v).toLocaleString('en-GB')}/MWh`
 const fmtTonnes = (v) => `${Math.round(v).toLocaleString('en-GB')} t`
 
@@ -473,10 +507,10 @@ function initialStateFromUrl() {
   const d = PRESETS[presetId]
   return {
     presetId,
-    windMW: num('w', d.defaultWindMW, 0, 200),
-    solarMW: num('s', d.defaultSolarMW, 0, 100),
-    demandMW: num('d', d.defaultDemandMW, 10, 150),
-    storageMW: num('sp', d.defaultDemandMW, 10, 150),
+    windMW: num('w', d.defaultWindMW, 0, 1000),
+    solarMW: num('s', d.defaultSolarMW, 0, 1000),
+    demandMW: num('d', d.defaultDemandMW, 10, 1000),
+    storageMW: num('sp', d.defaultDemandMW, 10, 1000),
     durationHours: num('h', 8, 4, 16),
     years: num('y', 25, 10, 60),
     discountPct: num('r', 7, 4, 12),
@@ -533,6 +567,17 @@ function PanelTitle({ step, title }) {
         {step}
       </span>
       <h3 className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">{title}</h3>
+    </div>
+  )
+}
+
+/** Numbered chapter headings that pace the customer conversation. */
+function SectionHeader({ n, title, cue }) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-b-2 border-[#CCFF00]/30 pb-1.5">
+      <span className="font-mono text-xl font-black leading-none text-[#CCFF00]">{n}</span>
+      <h2 className="text-sm font-black uppercase tracking-[0.15em] text-white">{title}</h2>
+      {cue && <span className="text-[11px] text-slate-500">{cue}</span>}
     </div>
   )
 }
@@ -738,15 +783,13 @@ export default function FirmingCalculator() {
       {/* ============ HEADER ============ */}
       <header className="border-b border-slate-800 bg-[#121824]">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center border border-[#CCFF00] bg-[#CCFF00]/10">
-              <Zap size={20} className="text-[#CCFF00]" aria-hidden="true" />
-            </div>
+          <div className="flex items-center gap-2.5">
+            <RheBlobMark blob={NEON} text="#0F172A" size={44} />
             <div>
-              <div className="text-lg font-black uppercase leading-tight tracking-wider text-white">
-                Rhe<span className="text-[#CCFF00]">Energise</span>
+              <div className="text-xl font-bold leading-tight tracking-tight text-white">
+                Energise
               </div>
-              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">
+              <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
                 HD Hydro · Firming &amp; LCOS Calculator
               </div>
             </div>
@@ -768,7 +811,7 @@ export default function FirmingCalculator() {
               <Printer size={12} aria-hidden="true" />
               Export PDF Summary
             </button>
-            <span className="border border-[#CCFF00]/50 bg-[#CCFF00]/10 px-2.5 py-1 text-[#CCFF00]">
+            <span className="hidden border border-[#CCFF00]/50 bg-[#CCFF00]/10 px-2.5 py-1 text-[#CCFF00] sm:inline">
               0% Degradation · 60-Year Life
             </span>
           </div>
@@ -779,10 +822,19 @@ export default function FirmingCalculator() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
           {/* ============ LEFT: DESIGN YOUR SYSTEM ============ */}
           <section className="lg:col-span-4" aria-label="Design your system">
-            <div className="border border-slate-800 bg-[#121824] p-5">
-              <h2 className="mb-1 text-base font-bold text-white">Design Your System</h2>
+            <div className="border border-slate-800 bg-[#121824] p-5 lg:sticky lg:top-4">
+              <div className="mb-1 flex items-center justify-between">
+                <h2 className="text-base font-bold text-white">Design Your System</h2>
+                <button
+                  type="button"
+                  onClick={() => selectPreset(presetId)}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 transition-colors hover:text-[#CCFF00]"
+                >
+                  <RotateCcw size={11} aria-hidden="true" /> Reset
+                </button>
+              </div>
               <p className="mb-5 text-xs text-slate-500">
-                Start with what you need to power. Live economics on the right.
+                Start with what you need to power. Everything on the right updates live.
               </p>
 
               {/* Location */}
@@ -830,8 +882,8 @@ export default function FirmingCalculator() {
                   sublabel={preset.demandSublabel}
                   value={demandMW}
                   min={10}
-                  max={150}
-                  step={5}
+                  max={1000}
+                  step={10}
                   unit={fmtMW}
                   onChange={setDemandMW}
                 />
@@ -846,8 +898,8 @@ export default function FirmingCalculator() {
                   sublabel={`${Math.round(preset.windCapacityFactor * 100)}% capacity factor at this site`}
                   value={windMW}
                   min={0}
-                  max={200}
-                  step={5}
+                  max={1000}
+                  step={10}
                   unit={fmtMW}
                   onChange={setWindMW}
                 />
@@ -857,8 +909,8 @@ export default function FirmingCalculator() {
                   sublabel="Seasonal daytime generation"
                   value={solarMW}
                   min={0}
-                  max={100}
-                  step={5}
+                  max={1000}
+                  step={10}
                   unit={fmtMW}
                   onChange={setSolarMW}
                 />
@@ -873,8 +925,8 @@ export default function FirmingCalculator() {
                   sublabel="How much of your demand the store can carry at once"
                   value={storageMW}
                   min={10}
-                  max={150}
-                  step={5}
+                  max={1000}
+                  step={10}
                   unit={fmtMW}
                   onChange={setStorageMW}
                 />
@@ -941,674 +993,599 @@ export default function FirmingCalculator() {
             </div>
           </section>
 
-          {/* ============ RIGHT: THE RHEENERGISE ADVANTAGE ============ */}
-          <section className="space-y-6 lg:col-span-8" aria-label="The RheEnergise advantage">
-            {/* ---- 1. 24-hour firming look ---- */}
-            <div className="border border-slate-800 bg-[#121824] p-5">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-bold text-white">
-                    {viewMode === 'day' ? 'The 24-Hour Firming Look' : 'The Winter Stress Week'}
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    {viewMode === 'day'
-                      ? preset.loadDescription
-                      : 'Seven winter days including a three-day wind lull — where deep storage earns its keep'}{' '}
-                    ·{' '}
-                    <span className="font-mono text-slate-400">
-                      {fmtMW(storageMW)} / {fmtMWh(energyCapMWh)} store
-                    </span>
-                  </p>
+          {/* ============ RIGHT: THE STORY ============ */}
+          <section className="space-y-8 lg:col-span-8" aria-label="The RheEnergise advantage">
+            {/* Headline strip — the whole story at a glance */}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="border border-slate-700 bg-[#121824] p-3 text-center">
+                <div className="font-mono text-lg font-black leading-tight text-white">
+                  <span className="text-slate-500">{kpiBefore.toFixed(0)}%</span>
+                  <ArrowRight size={14} className="mx-1 inline text-slate-500" aria-hidden="true" />
+                  <span className="rhe-glow text-[#CCFF00]">{kpiAfter.toFixed(0)}%</span>
                 </div>
-                {/* Before / after in the customer's own KPI: green firming for
-                    the export hub, peak-price exposure for the factory */}
-                <div>
-                  <div className="flex items-stretch gap-2">
-                    <div className="border border-slate-700 px-3 py-2 text-right">
-                      <div className="font-mono text-2xl font-black leading-none text-slate-500">
-                        {kpiBefore.toFixed(0)}%
-                      </div>
-                      <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-600">
-                        {presetId === 'anglesey' ? 'Green, No Storage' : 'Peak Grid Draw, No Storage'}
-                      </div>
-                    </div>
-                    <div className="flex items-center text-slate-500" aria-hidden="true">
-                      <ArrowRight size={18} />
-                    </div>
-                    <div className="border border-[#CCFF00] bg-[#CCFF00]/10 px-4 py-2 text-right">
-                      <div className="rhe-glow font-mono text-2xl font-black leading-none text-[#CCFF00]">
-                        {kpiAfter.toFixed(0)}%
-                      </div>
-                      <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">
-                        With HD Hydro
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-1 text-right text-[10px] text-slate-600">
-                    {presetId === 'anglesey'
-                      ? 'Green Firming Factor — your path to 100% continuous green power'
-                      : 'Share of peak-window power bought from the grid at peak prices'}
-                    {viewMode === 'week' && ' (winter week)'}
-                  </div>
+                <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  {presetId === 'anglesey' ? 'Continuous green power' : 'Peak grid exposure'}
                 </div>
               </div>
-
-              {/* Day / winter week toggle */}
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setViewMode('day')}
-                  aria-pressed={viewMode === 'day'}
-                  className={`flex items-center gap-1.5 border px-2.5 py-1 text-[11px] font-bold transition-colors ${
-                    viewMode === 'day'
-                      ? 'border-[#CCFF00] bg-[#CCFF00]/10 text-[#CCFF00]'
-                      : 'border-slate-700 text-slate-500 hover:border-slate-500'
-                  }`}
-                >
-                  <Clock size={12} aria-hidden="true" /> Typical Day
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode('week')}
-                  aria-pressed={viewMode === 'week'}
-                  className={`flex items-center gap-1.5 border px-2.5 py-1 text-[11px] font-bold transition-colors ${
-                    viewMode === 'week'
-                      ? 'border-[#CCFF00] bg-[#CCFF00]/10 text-[#CCFF00]'
-                      : 'border-slate-700 text-slate-500 hover:border-slate-500'
-                  }`}
-                >
-                  <Snowflake size={12} aria-hidden="true" /> Winter Stress Week
-                </button>
-                {viewMode === 'week' && (
-                  <span className="text-[10px] text-slate-600">
-                    Days 4–5: wind drops to ~25% · solar at 35% seasonal output
+              <div className="border border-slate-700 bg-[#121824] p-3 text-center">
+                <div className="rhe-glow font-mono text-lg font-black leading-tight text-[#CCFF00]">
+                  {fmtPerMWh(lcos.hdHydro)}
+                  <span className="ml-1.5 text-xs font-bold text-slate-500">
+                    vs {fmtPerMWh(lcos.lithium)} Li-ion
                   </span>
-                )}
-              </div>
-
-              <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={sim.day} margin={{ top: 5, right: 5, bottom: 0, left: -10 }}>
-                    <CartesianGrid stroke="#1E293B" vertical={false} />
-                    <XAxis
-                      dataKey="label"
-                      tick={{ fill: '#64748B', fontSize: 10 }}
-                      tickLine={false}
-                      axisLine={{ stroke: '#334155' }}
-                      interval={viewMode === 'day' ? 3 : 23}
-                      tickFormatter={(v) => (viewMode === 'week' ? v.replace(' 00:00', '') : v)}
-                    />
-                    <YAxis
-                      tick={{ fill: '#64748B', fontSize: 10 }}
-                      tickLine={false}
-                      axisLine={false}
-                      label={{
-                        value: 'MW',
-                        angle: -90,
-                        position: 'insideLeft',
-                        fill: '#64748B',
-                        fontSize: 10,
-                      }}
-                    />
-                    <Tooltip content={<ChartTooltip />} />
-                    <Legend
-                      wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
-                      iconType="plainline"
-                    />
-                    <ReferenceLine y={0} stroke="#334155" />
-                    <Area
-                      name="Wind"
-                      dataKey="wind"
-                      stackId="gen"
-                      type="monotone"
-                      stroke={SKY}
-                      fill={SKY}
-                      fillOpacity={0.18}
-                      strokeWidth={1.5}
-                    />
-                    <Area
-                      name="Solar"
-                      dataKey="solar"
-                      stackId="gen"
-                      type="monotone"
-                      stroke={SOLAR_YELLOW}
-                      fill={SOLAR_YELLOW}
-                      fillOpacity={0.18}
-                      strokeWidth={1.5}
-                    />
-                    <Bar
-                      name="Storage Deploying"
-                      dataKey="discharge"
-                      fill={NEON}
-                      fillOpacity={0.9}
-                      barSize={viewMode === 'day' ? 10 : 2}
-                    />
-                    <Bar
-                      name="Storage Catching Excess"
-                      dataKey="charge"
-                      fill={NEON}
-                      fillOpacity={0.3}
-                      barSize={viewMode === 'day' ? 10 : 2}
-                    />
-                    <Line
-                      name="Your Demand"
-                      dataKey="load"
-                      type="stepAfter"
-                      stroke="#F8FAFC"
-                      strokeWidth={viewMode === 'day' ? 2 : 1.5}
-                      dot={false}
-                    />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-              <p className="mt-2 text-[11px] text-slate-500">
-                Bright green blocks: the HD Hydro store deploying through generation
-                deficits. Dim green below the line: catching excess power that would
-                otherwise be curtailed.
-                {viewMode === 'week' &&
-                  ' Slide the duration up to watch the store ride further into the lull.'}
-              </p>
-              {presetId === 'anglesey' && sim.genCoverage > 0 && sim.genCoverage < 0.95 && (
-                <p className="mt-2 flex items-start gap-1.5 border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] leading-snug text-amber-400/90">
-                  <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
-                  {viewMode === 'week'
-                    ? `In this winter week your generation produces ${(sim.genCoverage * 100).toFixed(0)}% of the energy you need — no store of any technology can bridge a multi-day lull alone. Deep duration extends the ride-through; extra generation closes the gap.`
-                    : `Your generation mix produces ${(sim.genCoverage * 100).toFixed(0)}% of your daily energy need. Storage firms what you generate — add wind or solar capacity to raise the green ceiling.`}
-                </p>
-              )}
-            </div>
-
-            {/* ---- 2. Financial profile ---- */}
-            <div className="border border-slate-800 bg-[#121824] p-5">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-bold text-white">
-                    Levelized Cost of Storage (LCOS)
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    £ per MWh delivered, across discharge durations, over your{' '}
-                    {years}-year window at {discountPct}% cost of capital
-                  </p>
                 </div>
-                {hdAdvantagePct >= 1 ? (
-                  <div className="border border-[#CCFF00]/50 bg-[#CCFF00]/10 px-3 py-1.5 text-xs font-bold text-[#CCFF00]">
-                    HD Hydro {hdAdvantagePct.toFixed(0)}% below Lithium-ion at your design
-                  </div>
-                ) : (
-                  <div className="border border-amber-500/40 bg-amber-500/5 px-3 py-1.5 text-xs font-bold text-amber-500">
-                    Lithium-ion leads at this design — extend duration or window
-                  </div>
-                )}
-              </div>
-
-              {/* Honest sensitivity: where do Li-ion prices go? */}
-              <div className="mb-4 flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                  Lithium-ion price outlook:
-                </span>
-                {LI_OUTLOOKS.map((o) => (
-                  <button
-                    key={o.id}
-                    type="button"
-                    onClick={() => setLiOutlookId(o.id)}
-                    aria-pressed={o.id === liOutlookId}
-                    className={`border px-2.5 py-1 text-[11px] font-bold transition-colors ${
-                      o.id === liOutlookId
-                        ? 'border-amber-500 bg-amber-500/10 text-amber-400'
-                        : 'border-slate-700 text-slate-500 hover:border-slate-500'
-                    }`}
-                  >
-                    {o.label}
-                  </button>
-                ))}
-                <span className="text-[10px] text-slate-600">
-                  We model the competition at its best — pick the future you believe in.
-                </span>
-              </div>
-
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={lcosCurve} margin={{ top: 5, right: 5, bottom: 0, left: -10 }}>
-                    <CartesianGrid stroke="#1E293B" vertical={false} />
-                    <XAxis
-                      dataKey="duration"
-                      tick={{ fill: '#64748B', fontSize: 10 }}
-                      tickLine={false}
-                      axisLine={{ stroke: '#334155' }}
-                      tickFormatter={(d) => `${d}h`}
-                    />
-                    <YAxis
-                      tick={{ fill: '#64748B', fontSize: 10 }}
-                      tickLine={false}
-                      axisLine={false}
-                      tickFormatter={(v) => `£${v.toFixed(0)}`}
-                    />
-                    <Tooltip
-                      content={({ active, payload, label }) =>
-                        active && payload?.length ? (
-                          <div className="border border-slate-700 bg-[#0B1120] px-3 py-2 text-xs shadow-xl">
-                            <div className="mb-1 font-mono font-bold text-slate-300">
-                              {label}-hour duration
-                            </div>
-                            {payload.map((p) => (
-                              <div
-                                key={p.name}
-                                className="flex items-center justify-between gap-4"
-                              >
-                                <span style={{ color: p.color }}>{p.name}</span>
-                                <span className="font-mono text-slate-200">
-                                  {fmtPerMWh(p.value)}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null
-                      }
-                    />
-                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} iconType="plainline" />
-                    <ReferenceLine
-                      x={Math.min(durationHours, 16)}
-                      stroke={NEON}
-                      strokeDasharray="4 4"
-                      label={{
-                        value: 'Your design',
-                        fill: NEON,
-                        fontSize: 10,
-                        position: 'insideTopRight',
-                      }}
-                    />
-                    <Line
-                      name="Lithium-ion BESS"
-                      dataKey="lithium"
-                      stroke={AMBER}
-                      strokeWidth={2}
-                      dot={{ r: 3, fill: AMBER, strokeWidth: 0 }}
-                    />
-                    <Line
-                      name="Conventional Hydro"
-                      dataKey="convHydro"
-                      stroke={STEEL}
-                      strokeWidth={2}
-                      strokeDasharray="6 4"
-                      dot={{ r: 3, fill: STEEL, strokeWidth: 0 }}
-                    />
-                    <Line
-                      name="RheEnergise HD Hydro"
-                      dataKey="hdHydro"
-                      stroke={NEON}
-                      strokeWidth={3}
-                      dot={{ r: 4, fill: NEON, strokeWidth: 0 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                <div className="border border-[#CCFF00]/60 bg-[#CCFF00]/5 p-3 text-center">
-                  <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
-                    {fmtPerMWh(lcos.hdHydro)}
-                  </div>
-                  <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    RheEnergise HD Hydro
-                  </div>
-                </div>
-                <div className="border border-amber-500/40 p-3 text-center">
-                  <div className="font-mono text-xl font-black text-amber-500">
-                    {fmtPerMWh(lcos.lithium)}
-                  </div>
-                  <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Lithium-ion BESS
-                  </div>
-                </div>
-                <div className="border border-slate-700 p-3 text-center">
-                  <div className="font-mono text-xl font-black text-slate-400">
-                    {fmtPerMWh(lcos.convHydro)}
-                  </div>
-                  <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Conventional Hydro
-                  </div>
+                <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Cost per MWh delivered
                 </div>
               </div>
-            </div>
-
-            {/* ---- 3. UK policy fit: LDES cap & floor ---- */}
-            <div
-              className={`flex flex-wrap items-center justify-between gap-3 border p-4 ${
-                capFloorEligible ? 'border-[#CCFF00]/60 bg-[#CCFF00]/5' : 'border-slate-700 bg-[#121824]'
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                <BadgeCheck
-                  size={18}
-                  className={`mt-0.5 shrink-0 ${capFloorEligible ? 'text-[#CCFF00]' : 'text-slate-500'}`}
-                  aria-hidden="true"
-                />
-                <div>
-                  <div
-                    className={`text-sm font-black uppercase tracking-wide ${
-                      capFloorEligible ? 'text-[#CCFF00]' : 'text-slate-300'
-                    }`}
-                  >
-                    UK Policy Fit: Ofgem LDES Cap &amp; Floor
-                  </div>
-                  <p className="mt-0.5 max-w-2xl text-xs leading-relaxed text-slate-400">
-                    {capFloorEligible
-                      ? `Your ${durationHours}-hour design meets the scheme's 8-hour continuous-power threshold and can apply for 20–25 years of revenue-floor protection — de-risking financing at exactly the horizon where HD Hydro's economics dominate. (8-hour Lithium-ion also qualifies; HD Hydro differentiates on delivered cost at duration, zero-degradation capacity, and 35+ years of asset life after the scheme ends.)`
-                      : `At ${durationHours} hours your design is below the scheme's 8-hour continuous-power threshold. Extend the duration to qualify for 20–25 years of revenue-floor support.`}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setDurationHours(Math.max(8, durationHours))
-                  setYears(25)
-                }}
-                className={`shrink-0 border px-3 py-1.5 text-[11px] font-bold transition-colors ${
-                  capFloorEligible && years === 25
-                    ? 'border-slate-700 text-slate-600'
-                    : 'border-[#CCFF00]/60 bg-[#CCFF00]/10 text-[#CCFF00] hover:bg-[#CCFF00]/20'
-                }`}
-              >
-                {capFloorEligible && years === 25
-                  ? 'Framed for the scheme ✓'
-                  : 'Frame for the scheme: 8h+ / 25 yrs'}
-              </button>
-            </div>
-
-            {/* ---- 4. Cumulative cash cost ---- */}
-            <div className="border border-slate-800 bg-[#121824] p-5">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-bold text-white">
-                    Total Cash Out the Door — {years} Years
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    Cumulative spend, undiscounted. Watch Lithium-ion step up at every
-                    stack augmentation while HD Hydro stays flat.
-                  </p>
-                </div>
-              </div>
-              <div className="h-56">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={cashCurve} margin={{ top: 5, right: 5, bottom: 0, left: -5 }}>
-                    <CartesianGrid stroke="#1E293B" vertical={false} />
-                    <XAxis
-                      dataKey="year"
-                      tick={{ fill: '#64748B', fontSize: 10 }}
-                      tickLine={false}
-                      axisLine={{ stroke: '#334155' }}
-                      tickFormatter={(y) => `Yr ${y}`}
-                    />
-                    <YAxis
-                      tick={{ fill: '#64748B', fontSize: 10 }}
-                      tickLine={false}
-                      axisLine={false}
-                      tickFormatter={(v) => `£${v.toFixed(0)}M`}
-                    />
-                    <Tooltip
-                      content={({ active, payload, label }) =>
-                        active && payload?.length ? (
-                          <div className="border border-slate-700 bg-[#0B1120] px-3 py-2 text-xs shadow-xl">
-                            <div className="mb-1 font-mono font-bold text-slate-300">
-                              Year {label}
-                            </div>
-                            {payload.map((p) => (
-                              <div
-                                key={p.name}
-                                className="flex items-center justify-between gap-4"
-                              >
-                                <span style={{ color: p.color }}>{p.name}</span>
-                                <span className="font-mono text-slate-200">
-                                  £{p.value.toFixed(1)}M
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null
-                      }
-                    />
-                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} iconType="plainline" />
-                    <Line
-                      name="Lithium-ion BESS"
-                      dataKey="lithium"
-                      type="stepAfter"
-                      stroke={AMBER}
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                    <Line
-                      name="Conventional Hydro"
-                      dataKey="convHydro"
-                      type="monotone"
-                      stroke={STEEL}
-                      strokeWidth={2}
-                      strokeDasharray="6 4"
-                      dot={false}
-                    />
-                    <Line
-                      name="RheEnergise HD Hydro"
-                      dataKey="hdHydro"
-                      type="monotone"
-                      stroke={NEON}
-                      strokeWidth={3}
-                      dot={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* ---- 5. Executive grid ---- */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {/* Investment case */}
-              <div className="border border-slate-800 bg-[#121824] p-4">
-                <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">
-                  <PiggyBank size={14} className="text-[#CCFF00]" aria-hidden="true" />
-                  The Investment Case vs Lithium-ion
-                </div>
+              <div className="border border-slate-700 bg-[#121824] p-3 text-center">
                 <div
-                  className={`rhe-glow font-mono text-3xl font-black ${
+                  className={`rhe-glow font-mono text-lg font-black leading-tight ${
                     lifetimeSavings >= 0 ? 'text-[#CCFF00]' : 'text-amber-500'
                   }`}
                 >
                   {fmtMillions(lifetimeSavings)}
                 </div>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {investment.irr !== null && (
-                    <span className="flex items-center gap-1 border border-[#CCFF00]/40 bg-[#CCFF00]/10 px-2 py-0.5 font-mono text-[11px] font-bold text-[#CCFF00]">
-                      <TrendingUp size={11} aria-hidden="true" />
-                      {(investment.irr * 100).toFixed(1)}% IRR
-                    </span>
-                  )}
-                  {investment.paybackYear !== null && (
-                    <span className="border border-slate-600 px-2 py-0.5 font-mono text-[11px] font-bold text-slate-300">
-                      Payback by year {investment.paybackYear}
-                    </span>
-                  )}
-                  {investment.upfrontPremium <= 0 && (
-                    <span className="border border-[#CCFF00]/40 bg-[#CCFF00]/10 px-2 py-0.5 font-mono text-[11px] font-bold text-[#CCFF00]">
-                      Cheaper from day one
-                    </span>
-                  )}
+                <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Saved vs Li-ion over {years} yrs
                 </div>
-                <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
-                  {lifetimeSavings >= 0
-                    ? investment.irr !== null
-                      ? `Savings over ${years} years. The IRR is the return earned on HD Hydro's ${fmtMillions(investment.upfrontPremium)} upfront premium, repaid by Lithium-ion's avoided augmentations and O&M.`
-                      : `Cumulative savings over your ${years}-year window by choosing HD Hydro.`
-                    : 'Lithium-ion holds a short-duration edge here — extend duration or window to flip it.'}
-                </p>
               </div>
+            </div>
 
-              {/* Land & footprint */}
-              <div className="border border-slate-800 bg-[#121824] p-4">
-                <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">
-                  <Leaf size={14} className="text-[#CCFF00]" aria-hidden="true" />
-                  Land &amp; Footprint Reduction
-                </div>
-                <div className="rhe-glow font-mono text-3xl font-black text-[#CCFF00]">60%</div>
-                <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
-                  Smaller environmental footprint vs. standard hydro — 2.5× denser R-19
-                  fluid means 60% smaller pipes, tanks and land disruption.
-                </p>
-              </div>
-
-              {/* Re-investment liability */}
-              <div className="border border-slate-800 bg-[#121824] p-4">
-                <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">
-                  <RefreshCcw size={14} className="text-amber-500" aria-hidden="true" />
-                  Future Re-Investment Liability
-                </div>
-                <div className="flex items-baseline gap-3">
-                  <div>
-                    <span className="rhe-glow font-mono text-3xl font-black text-[#CCFF00]">
-                      £0
-                    </span>
-                    <span className="ml-1.5 text-[10px] font-bold uppercase text-slate-500">
-                      HD Hydro
+            {/* ---- 01 · Your power, firmed ---- */}
+            <div className="space-y-4">
+              <SectionHeader
+                n="01"
+                title="Your Power, Firmed"
+                cue="what the store does for you, hour by hour"
+              />
+              <div className="border border-slate-800 bg-[#121824] p-5">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('day')}
+                      aria-pressed={viewMode === 'day'}
+                      className={`flex items-center gap-1.5 border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                        viewMode === 'day'
+                          ? 'border-[#CCFF00] bg-[#CCFF00]/10 text-[#CCFF00]'
+                          : 'border-slate-700 text-slate-500 hover:border-slate-500'
+                      }`}
+                    >
+                      <Clock size={12} aria-hidden="true" /> Typical Day
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('week')}
+                      aria-pressed={viewMode === 'week'}
+                      className={`flex items-center gap-1.5 border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                        viewMode === 'week'
+                          ? 'border-[#CCFF00] bg-[#CCFF00]/10 text-[#CCFF00]'
+                          : 'border-slate-700 text-slate-500 hover:border-slate-500'
+                      }`}
+                    >
+                      <Snowflake size={12} aria-hidden="true" /> Winter Stress Week
+                    </button>
+                    <span className="font-mono text-[11px] text-slate-500">
+                      {fmtMW(storageMW)} / {fmtMWh(energyCapMWh)} store
                     </span>
                   </div>
                   <div>
-                    <span className="font-mono text-xl font-black text-amber-500">
-                      {fmtMillions(reinvestmentLiability)}
-                    </span>
-                    <span className="ml-1.5 text-[10px] font-bold uppercase text-slate-500">
-                      Li-ion
-                    </span>
+                    <div className="flex items-stretch gap-2">
+                      <div className="border border-slate-700 px-3 py-1.5 text-right">
+                        <div className="font-mono text-xl font-black leading-none text-slate-500">
+                          {kpiBefore.toFixed(0)}%
+                        </div>
+                        <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-slate-600">
+                          {presetId === 'anglesey' ? 'Green, no storage' : 'Peak draw, no storage'}
+                        </div>
+                      </div>
+                      <div className="flex items-center text-slate-500" aria-hidden="true">
+                        <ArrowRight size={16} />
+                      </div>
+                      <div className="border border-[#CCFF00] bg-[#CCFF00]/10 px-3 py-1.5 text-right">
+                        <div className="rhe-glow font-mono text-xl font-black leading-none text-[#CCFF00]">
+                          {kpiAfter.toFixed(0)}%
+                        </div>
+                        <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-slate-400">
+                          With HD Hydro
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <p className="mt-1.5 flex items-start gap-1 text-[11px] leading-snug text-slate-500">
-                  <AlertTriangle
-                    size={12}
-                    className="mt-0.5 shrink-0 text-amber-500"
+
+                <div className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={sim.day} margin={{ top: 5, right: 5, bottom: 0, left: -10 }}>
+                      <CartesianGrid stroke="#1E293B" vertical={false} />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fill: '#64748B', fontSize: 10 }}
+                        tickLine={false}
+                        axisLine={{ stroke: '#334155' }}
+                        interval={viewMode === 'day' ? 3 : 23}
+                        tickFormatter={(v) => (viewMode === 'week' ? v.replace(' 00:00', '') : v)}
+                      />
+                      <YAxis
+                        tick={{ fill: '#64748B', fontSize: 10 }}
+                        tickLine={false}
+                        axisLine={false}
+                        label={{
+                          value: 'MW',
+                          angle: -90,
+                          position: 'insideLeft',
+                          fill: '#64748B',
+                          fontSize: 10,
+                        }}
+                      />
+                      <Tooltip content={<ChartTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} iconType="plainline" />
+                      <ReferenceLine y={0} stroke="#334155" />
+                      <Area
+                        name="Wind"
+                        dataKey="wind"
+                        stackId="gen"
+                        type="monotone"
+                        stroke={SKY}
+                        fill={SKY}
+                        fillOpacity={0.18}
+                        strokeWidth={1.5}
+                      />
+                      <Area
+                        name="Solar"
+                        dataKey="solar"
+                        stackId="gen"
+                        type="monotone"
+                        stroke={SOLAR_YELLOW}
+                        fill={SOLAR_YELLOW}
+                        fillOpacity={0.18}
+                        strokeWidth={1.5}
+                      />
+                      <Bar
+                        name="Storage Deploying"
+                        dataKey="discharge"
+                        fill={NEON}
+                        fillOpacity={0.9}
+                        barSize={viewMode === 'day' ? 10 : 2}
+                      />
+                      <Bar
+                        name="Storage Catching Excess"
+                        dataKey="charge"
+                        fill={NEON}
+                        fillOpacity={0.3}
+                        barSize={viewMode === 'day' ? 10 : 2}
+                      />
+                      <Line
+                        name="Your Demand"
+                        dataKey="load"
+                        type="stepAfter"
+                        stroke="#F8FAFC"
+                        strokeWidth={viewMode === 'day' ? 2 : 1.5}
+                        dot={false}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+                <p className="mt-2 text-[11px] text-slate-500">
+                  Bright green: the store deploying through deficits. Dim green below the
+                  line: catching excess power that would otherwise be curtailed.
+                  {viewMode === 'week' &&
+                    ' Days 4–5 are a wind lull — slide the duration up to ride further into it.'}
+                </p>
+                {presetId === 'anglesey' && sim.genCoverage > 0 && sim.genCoverage < 0.95 && (
+                  <p className="mt-2 flex items-start gap-1.5 border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] leading-snug text-amber-400/90">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
+                    {viewMode === 'week'
+                      ? `In this winter week your generation produces ${(sim.genCoverage * 100).toFixed(0)}% of the energy you need — no store of any technology can bridge a multi-day lull alone. Deep duration extends the ride-through; extra generation closes the gap.`
+                      : `Your generation mix produces ${(sim.genCoverage * 100).toFixed(0)}% of your daily energy need. Storage firms what you generate — add wind or solar capacity to raise the green ceiling.`}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* ---- 02 · What it costs ---- */}
+            <div className="space-y-4">
+              <SectionHeader
+                n="02"
+                title="What It Costs"
+                cue="cost per MWh, and total cash over the life of the deal"
+              />
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                {/* LCOS card */}
+                <div className="border border-slate-800 bg-[#121824] p-5">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-sm font-bold text-white">
+                      Cost per MWh Delivered (LCOS)
+                    </div>
+                    {hdAdvantagePct >= 1 ? (
+                      <div className="border border-[#CCFF00]/50 bg-[#CCFF00]/10 px-2 py-1 text-[10px] font-bold text-[#CCFF00]">
+                        HD Hydro {hdAdvantagePct.toFixed(0)}% below Li-ion
+                      </div>
+                    ) : (
+                      <div className="border border-amber-500/40 bg-amber-500/5 px-2 py-1 text-[10px] font-bold text-amber-500">
+                        Li-ion leads at this design
+                      </div>
+                    )}
+                  </div>
+                  <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                      Li-ion prices:
+                    </span>
+                    {LI_OUTLOOKS.map((o) => (
+                      <button
+                        key={o.id}
+                        type="button"
+                        onClick={() => setLiOutlookId(o.id)}
+                        aria-pressed={o.id === liOutlookId}
+                        className={`border px-2 py-0.5 text-[10px] font-bold transition-colors ${
+                          o.id === liOutlookId
+                            ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                            : 'border-slate-700 text-slate-500 hover:border-slate-500'
+                        }`}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="h-52">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={lcosCurve} margin={{ top: 5, right: 5, bottom: 0, left: -10 }}>
+                        <CartesianGrid stroke="#1E293B" vertical={false} />
+                        <XAxis
+                          dataKey="duration"
+                          tick={{ fill: '#64748B', fontSize: 10 }}
+                          tickLine={false}
+                          axisLine={{ stroke: '#334155' }}
+                          tickFormatter={(d) => `${d}h`}
+                        />
+                        <YAxis
+                          tick={{ fill: '#64748B', fontSize: 10 }}
+                          tickLine={false}
+                          axisLine={false}
+                          tickFormatter={(v) => `£${v.toFixed(0)}`}
+                        />
+                        <Tooltip
+                          content={({ active, payload, label }) =>
+                            active && payload?.length ? (
+                              <div className="border border-slate-700 bg-[#0B1120] px-3 py-2 text-xs shadow-xl">
+                                <div className="mb-1 font-mono font-bold text-slate-300">
+                                  {label}-hour duration
+                                </div>
+                                {payload.map((p) => (
+                                  <div key={p.name} className="flex items-center justify-between gap-4">
+                                    <span style={{ color: p.color }}>{p.name}</span>
+                                    <span className="font-mono text-slate-200">
+                                      {fmtPerMWh(p.value)}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null
+                          }
+                        />
+                        <ReferenceLine
+                          x={Math.min(durationHours, 16)}
+                          stroke={NEON}
+                          strokeDasharray="4 4"
+                          label={{
+                            value: 'Your design',
+                            fill: NEON,
+                            fontSize: 10,
+                            position: 'insideTopRight',
+                          }}
+                        />
+                        <Line
+                          name="Lithium-ion BESS"
+                          dataKey="lithium"
+                          stroke={AMBER}
+                          strokeWidth={2}
+                          dot={{ r: 3, fill: AMBER, strokeWidth: 0 }}
+                        />
+                        <Line
+                          name="Conventional Hydro"
+                          dataKey="convHydro"
+                          stroke={STEEL}
+                          strokeWidth={2}
+                          strokeDasharray="6 4"
+                          dot={{ r: 3, fill: STEEL, strokeWidth: 0 }}
+                        />
+                        <Line
+                          name="RheEnergise HD Hydro"
+                          dataKey="hdHydro"
+                          stroke={NEON}
+                          strokeWidth={3}
+                          dot={{ r: 4, fill: NEON, strokeWidth: 0 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    <div className="border border-[#CCFF00]/60 bg-[#CCFF00]/5 p-2 text-center">
+                      <div className="rhe-glow font-mono text-base font-black text-[#CCFF00]">
+                        {fmtPerMWh(lcos.hdHydro)}
+                      </div>
+                      <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                        HD Hydro
+                      </div>
+                    </div>
+                    <div className="border border-amber-500/40 p-2 text-center">
+                      <div className="font-mono text-base font-black text-amber-500">
+                        {fmtPerMWh(lcos.lithium)}
+                      </div>
+                      <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                        Lithium-ion
+                      </div>
+                    </div>
+                    <div className="border border-slate-700 p-2 text-center">
+                      <div className="font-mono text-base font-black text-slate-400">
+                        {fmtPerMWh(lcos.convHydro)}
+                      </div>
+                      <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                        Conv. Hydro
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Cash curve card */}
+                <div className="border border-slate-800 bg-[#121824] p-5">
+                  <div className="mb-2 text-sm font-bold text-white">
+                    Total Cash Out the Door — {years} Years
+                  </div>
+                  <p className="mb-3 text-[11px] text-slate-500">
+                    Cumulative, undiscounted. Lithium-ion steps up at every stack
+                    augmentation; HD Hydro stays flat.
+                  </p>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={cashCurve} margin={{ top: 5, right: 5, bottom: 0, left: -5 }}>
+                        <CartesianGrid stroke="#1E293B" vertical={false} />
+                        <XAxis
+                          dataKey="year"
+                          tick={{ fill: '#64748B', fontSize: 10 }}
+                          tickLine={false}
+                          axisLine={{ stroke: '#334155' }}
+                          tickFormatter={(y) => `Yr ${y}`}
+                        />
+                        <YAxis
+                          tick={{ fill: '#64748B', fontSize: 10 }}
+                          tickLine={false}
+                          axisLine={false}
+                          tickFormatter={(v) => (v >= 1000 ? `£${(v / 1000).toFixed(1)}B` : `£${v.toFixed(0)}M`)}
+                        />
+                        <Tooltip
+                          content={({ active, payload, label }) =>
+                            active && payload?.length ? (
+                              <div className="border border-slate-700 bg-[#0B1120] px-3 py-2 text-xs shadow-xl">
+                                <div className="mb-1 font-mono font-bold text-slate-300">
+                                  Year {label}
+                                </div>
+                                {payload.map((p) => (
+                                  <div key={p.name} className="flex items-center justify-between gap-4">
+                                    <span style={{ color: p.color }}>{p.name}</span>
+                                    <span className="font-mono text-slate-200">
+                                      £{p.value.toFixed(1)}M
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null
+                          }
+                        />
+                        <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} iconType="plainline" />
+                        <Line
+                          name="Lithium-ion BESS"
+                          dataKey="lithium"
+                          type="stepAfter"
+                          stroke={AMBER}
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                        <Line
+                          name="Conventional Hydro"
+                          dataKey="convHydro"
+                          type="monotone"
+                          stroke={STEEL}
+                          strokeWidth={2}
+                          strokeDasharray="6 4"
+                          dot={false}
+                        />
+                        <Line
+                          name="RheEnergise HD Hydro"
+                          dataKey="hdHydro"
+                          type="monotone"
+                          stroke={NEON}
+                          strokeWidth={3}
+                          dot={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+
+              {/* Cap & floor — one slim policy line */}
+              <div
+                className={`flex flex-wrap items-center justify-between gap-3 border px-4 py-3 ${
+                  capFloorEligible ? 'border-[#CCFF00]/60 bg-[#CCFF00]/5' : 'border-slate-700 bg-[#121824]'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <BadgeCheck
+                    size={16}
+                    className={capFloorEligible ? 'text-[#CCFF00]' : 'text-slate-500'}
                     aria-hidden="true"
                   />
-                  {augmentations > 0
-                    ? `Budgeted stack replacement${augmentations > 1 ? 's' : ''} (${augmentations}×) to keep Lithium-ion at contract capacity over ${years} years — a planned cost in any honest BESS model, and a line item HD Hydro simply doesn't have.`
-                    : 'Within ~10 years Li-ion avoids replacement — but degrades ~2% every year regardless.'}
-                </p>
-              </div>
-
-              {/* Deployment feasibility */}
-              <div className="border border-slate-800 bg-[#121824] p-4">
-                <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">
-                  <ShieldCheck size={14} className="text-[#CCFF00]" aria-hidden="true" />
-                  Deployment Reality
+                  <p className="text-xs leading-snug text-slate-400">
+                    <span
+                      className={`font-black uppercase tracking-wide ${
+                        capFloorEligible ? 'text-[#CCFF00]' : 'text-slate-300'
+                      }`}
+                    >
+                      Ofgem LDES Cap &amp; Floor:{' '}
+                    </span>
+                    {capFloorEligible
+                      ? `your ${durationHours}-hour design meets the 8-hour threshold — eligible to apply for 20–25 years of revenue-floor protection, exactly the horizon where HD Hydro dominates. (8h Li-ion qualifies too; HD differentiates on cost at duration, zero degradation, and 35+ years of life after the scheme.)`
+                      : `at ${durationHours} hours you're below the 8-hour threshold for 20–25 years of revenue-floor support.`}
+                  </p>
                 </div>
-                <div className="space-y-1.5 text-xs">
-                  <div className="flex items-center justify-between gap-2 border border-[#CCFF00]/40 bg-[#CCFF00]/10 px-2.5 py-1.5">
-                    <span className="flex items-center gap-1.5 font-bold text-[#CCFF00]">
-                      <Landmark size={13} aria-hidden="true" /> HD Hydro
-                    </span>
-                    <span className="font-mono font-bold text-[#CCFF00]">
-                      100m hills · ~2–3 yr build
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2 border border-slate-700 px-2.5 py-1.5">
-                    <span className="flex items-center gap-1.5 text-slate-400">
-                      <BatteryCharging size={13} aria-hidden="true" /> Lithium-ion
-                    </span>
-                    <span className="font-mono text-slate-400">
-                      Anywhere · ~1–2 yr build
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2 border border-slate-700 px-2.5 py-1.5">
-                    <span className="flex items-center gap-1.5 text-slate-400">
-                      <Mountain size={13} aria-hidden="true" /> Conventional Hydro
-                    </span>
-                    <span className="font-mono text-slate-500">
-                      300m+ mountains · 8+ yrs
-                    </span>
-                  </div>
-                </div>
-                <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
-                  HD Hydro opens an order of magnitude more UK sites than mountain-locked
-                  pumped hydro — small North Wales hillsides, not ranges.
-                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDurationHours(Math.max(8, durationHours))
+                    setYears(25)
+                  }}
+                  className={`shrink-0 border px-3 py-1.5 text-[11px] font-bold transition-colors ${
+                    capFloorEligible && years === 25
+                      ? 'border-slate-700 text-slate-600'
+                      : 'border-[#CCFF00]/60 bg-[#CCFF00]/10 text-[#CCFF00] hover:bg-[#CCFF00]/20'
+                  }`}
+                >
+                  {capFloorEligible && years === 25
+                    ? 'Framed for the scheme ✓'
+                    : 'Frame for the scheme: 8h+ / 25 yrs'}
+                </button>
               </div>
             </div>
 
-            {/* ---- 6. Straight talk: honest fit guide ---- */}
-            <div className="border border-slate-800 bg-[#121824] p-5">
-              <div className="mb-3 flex items-center gap-2">
-                <Scale size={15} className="text-[#CCFF00]" aria-hidden="true" />
-                <h2 className="text-sm font-bold uppercase tracking-wide text-white">
-                  Straight Talk — Pick the Right Tool
-                </h2>
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="border border-slate-700 p-3">
-                  <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                    Where Lithium-ion is the right call
-                  </div>
-                  <ul className="space-y-1.5 text-[11px] leading-snug text-slate-500">
-                    {[
-                      'Durations of ~6 hours or less',
-                      'Power needed on-grid within ~24 months',
-                      'Revenue built on rapid frequency response',
-                      'Small or urban sites with no usable hill',
-                    ].map((item) => (
-                      <li key={item} className="flex items-start gap-1.5">
-                        <CircleCheck
-                          size={12}
-                          className="mt-0.5 shrink-0 text-slate-500"
-                          aria-hidden="true"
-                        />
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="border border-[#CCFF00]/40 bg-[#CCFF00]/5 p-3">
-                  <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[#CCFF00]">
-                    Where HD Hydro is the right call
-                  </div>
-                  <ul className="space-y-1.5 text-[11px] leading-snug text-slate-400">
-                    {[
-                      'Firming for 8+ hours, day after day',
-                      'Contracts and horizons of 20+ years',
-                      'Zero-degradation contracted capacity',
-                      'A hedge against cell-price & supply-chain risk',
-                    ].map((item) => (
-                      <li key={item} className="flex items-start gap-1.5">
-                        <CircleCheck
-                          size={12}
-                          className="mt-0.5 shrink-0 text-[#CCFF00]"
-                          aria-hidden="true"
-                        />
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-              <p className="mt-3 text-[11px] leading-snug text-slate-500">
-                The strongest portfolios use both: a fast battery for power services,
-                co-located with HD Hydro for deep, zero-degradation energy. We're happy to
-                design the hybrid.
-              </p>
-            </div>
-
-            {/* ---- 7. Strategic advice banner ---- */}
-            <div
-              className={`flex items-start gap-3 border p-4 ${
-                advice.tone === 'neutral'
-                  ? 'border-slate-600 bg-[#121824]'
-                  : advice.tone === 'positive'
-                    ? 'border-[#CCFF00]/60 bg-[#CCFF00]/5'
-                    : 'border-[#CCFF00] bg-[#CCFF00]/10'
-              }`}
-              role="status"
-            >
-              <Zap
-                size={18}
-                className={`mt-0.5 shrink-0 ${
-                  advice.tone === 'neutral' ? 'text-slate-400' : 'text-[#CCFF00]'
-                }`}
-                aria-hidden="true"
+            {/* ---- 03 · The executive case ---- */}
+            <div className="space-y-4">
+              <SectionHeader
+                n="03"
+                title="The Executive Case"
+                cue="the four numbers your board will ask for"
               />
-              <div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {/* Investment case */}
+                <div className="border border-slate-800 bg-[#121824] p-4">
+                  <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">
+                    <PiggyBank size={14} className="text-[#CCFF00]" aria-hidden="true" />
+                    The Investment Case vs Lithium-ion
+                  </div>
+                  <div
+                    className={`rhe-glow font-mono text-3xl font-black ${
+                      lifetimeSavings >= 0 ? 'text-[#CCFF00]' : 'text-amber-500'
+                    }`}
+                  >
+                    {fmtMillions(lifetimeSavings)}
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {investment.irr !== null && (
+                      <span className="flex items-center gap-1 border border-[#CCFF00]/40 bg-[#CCFF00]/10 px-2 py-0.5 font-mono text-[11px] font-bold text-[#CCFF00]">
+                        <TrendingUp size={11} aria-hidden="true" />
+                        {(investment.irr * 100).toFixed(1)}% IRR
+                      </span>
+                    )}
+                    {investment.paybackYear !== null && (
+                      <span className="border border-slate-600 px-2 py-0.5 font-mono text-[11px] font-bold text-slate-300">
+                        Payback by year {investment.paybackYear}
+                      </span>
+                    )}
+                    {investment.upfrontPremium <= 0 && (
+                      <span className="border border-[#CCFF00]/40 bg-[#CCFF00]/10 px-2 py-0.5 font-mono text-[11px] font-bold text-[#CCFF00]">
+                        Cheaper from day one
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
+                    {lifetimeSavings >= 0
+                      ? investment.irr !== null
+                        ? `Savings over ${years} years. The IRR is the return on HD Hydro's ${fmtMillions(investment.upfrontPremium)} upfront premium, repaid by Lithium-ion's avoided augmentations and O&M.`
+                        : `Cumulative savings over your ${years}-year window by choosing HD Hydro.`
+                      : 'Lithium-ion holds a short-duration edge here — extend duration or window to flip it.'}
+                  </p>
+                </div>
+
+                {/* Re-investment liability */}
+                <div className="border border-slate-800 bg-[#121824] p-4">
+                  <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">
+                    <RefreshCcw size={14} className="text-amber-500" aria-hidden="true" />
+                    Future Re-Investment Liability
+                  </div>
+                  <div className="flex items-baseline gap-3">
+                    <div>
+                      <span className="rhe-glow font-mono text-3xl font-black text-[#CCFF00]">
+                        £0
+                      </span>
+                      <span className="ml-1.5 text-[10px] font-bold uppercase text-slate-500">
+                        HD Hydro
+                      </span>
+                    </div>
+                    <div>
+                      <span className="font-mono text-xl font-black text-amber-500">
+                        {fmtMillions(reinvestmentLiability)}
+                      </span>
+                      <span className="ml-1.5 text-[10px] font-bold uppercase text-slate-500">
+                        Li-ion
+                      </span>
+                    </div>
+                  </div>
+                  <p className="mt-1.5 flex items-start gap-1 text-[11px] leading-snug text-slate-500">
+                    <AlertTriangle
+                      size={12}
+                      className="mt-0.5 shrink-0 text-amber-500"
+                      aria-hidden="true"
+                    />
+                    {augmentations > 0
+                      ? `Budgeted stack replacement${augmentations > 1 ? 's' : ''} (${augmentations}×) to keep Lithium-ion at contract capacity over ${years} years — a planned cost in any honest BESS model, and a line item HD Hydro simply doesn't have.`
+                      : 'Within ~10 years Li-ion avoids replacement — but degrades ~2% every year regardless.'}
+                  </p>
+                </div>
+
+                {/* Land & footprint */}
+                <div className="border border-slate-800 bg-[#121824] p-4">
+                  <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">
+                    <Leaf size={14} className="text-[#CCFF00]" aria-hidden="true" />
+                    Land &amp; Footprint Reduction
+                  </div>
+                  <div className="rhe-glow font-mono text-3xl font-black text-[#CCFF00]">60%</div>
+                  <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
+                    Smaller environmental footprint vs. standard hydro — 2.5× denser R-19
+                    fluid means 60% smaller pipes, tanks and land disruption.
+                  </p>
+                </div>
+
+                {/* Deployment feasibility */}
+                <div className="border border-slate-800 bg-[#121824] p-4">
+                  <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">
+                    <ShieldCheck size={14} className="text-[#CCFF00]" aria-hidden="true" />
+                    Deployment Reality
+                  </div>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between gap-2 border border-[#CCFF00]/40 bg-[#CCFF00]/10 px-2.5 py-1.5">
+                      <span className="flex items-center gap-1.5 font-bold text-[#CCFF00]">
+                        <Landmark size={13} aria-hidden="true" /> HD Hydro
+                      </span>
+                      <span className="font-mono font-bold text-[#CCFF00]">
+                        100m hills · ~2–3 yr build
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 border border-slate-700 px-2.5 py-1.5">
+                      <span className="flex items-center gap-1.5 text-slate-400">
+                        <BatteryCharging size={13} aria-hidden="true" /> Lithium-ion
+                      </span>
+                      <span className="font-mono text-slate-400">Anywhere · ~1–2 yr build</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 border border-slate-700 px-2.5 py-1.5">
+                      <span className="flex items-center gap-1.5 text-slate-400">
+                        <Mountain size={13} aria-hidden="true" /> Conventional Hydro
+                      </span>
+                      <span className="font-mono text-slate-500">300m+ mountains · 8+ yrs</span>
+                    </div>
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
+                    HD Hydro opens an order of magnitude more UK sites than mountain-locked
+                    pumped hydro — small North Wales hillsides, not ranges.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* ---- 04 · The bottom line ---- */}
+            <div className="space-y-4">
+              <SectionHeader n="04" title="The Bottom Line" cue="why HD Hydro, in your numbers" />
+              <div className="border-2 border-[#CCFF00] bg-[#CCFF00]/5 p-5">
                 <div
                   className={`text-sm font-black uppercase tracking-wide ${
                     advice.tone === 'neutral' ? 'text-slate-200' : 'text-[#CCFF00]'
@@ -1616,98 +1593,147 @@ export default function FirmingCalculator() {
                 >
                   {advice.title}
                 </div>
-                <p className="mt-0.5 text-xs leading-relaxed text-slate-400">{advice.body}</p>
+                <p className="mb-4 mt-0.5 max-w-3xl text-xs leading-relaxed text-slate-400">
+                  {advice.body}
+                </p>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                  <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
+                    <div
+                      className={`rhe-glow font-mono text-xl font-black ${
+                        lifetimeSavings >= 0 ? 'text-[#CCFF00]' : 'text-amber-500'
+                      }`}
+                    >
+                      {fmtMillions(lifetimeSavings)}
+                    </div>
+                    <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Cash saved vs Lithium-ion over {years} years
+                    </div>
+                  </div>
+                  <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
+                    <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
+                      {investment.irr !== null
+                        ? `${(investment.irr * 100).toFixed(1)}%`
+                        : `${Math.max(0, hdAdvantagePct).toFixed(0)}%`}
+                    </div>
+                    <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      {investment.irr !== null
+                        ? 'IRR on the upfront premium vs Li-ion'
+                        : 'Lower cost per MWh than Lithium-ion'}
+                    </div>
+                  </div>
+                  <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
+                    <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
+                      {presetId === 'anglesey'
+                        ? `+${(simDay.firmingFactor - simDay.bareCoverage).toFixed(0)}pts`
+                        : `−${(simDay.peakGridBefore - simDay.peakGridAfter).toFixed(0)}pts`}
+                    </div>
+                    <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      {presetId === 'anglesey'
+                        ? `Continuous green power (${simDay.bareCoverage.toFixed(0)}% → ${simDay.firmingFactor.toFixed(0)}%)`
+                        : `Peak-price grid exposure (${simDay.peakGridBefore.toFixed(0)}% → ${simDay.peakGridAfter.toFixed(0)}%)`}
+                    </div>
+                  </div>
+                  <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
+                    <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
+                      {annualCurtailmentGWh.toFixed(1)} GWh
+                    </div>
+                    <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Surplus power captured per year, not curtailed
+                    </div>
+                  </div>
+                  <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
+                    <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
+                      {fmtTonnes(annualCO2Avoided)}
+                    </div>
+                    <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      CO₂e avoided each year vs gas-fired firming
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-1.5 text-[11px] leading-snug text-slate-400 sm:grid-cols-2">
+                  {[
+                    `One build, ${TECH.hdHydro.lifeYears} years of service — at ${fmtPerMWh(lcos.hdHydro)} vs ${fmtPerMWh(lcos.lithium)} for Lithium-ion at your design`,
+                    `£0 of stack-replacement liability vs ${fmtMillions(reinvestmentLiability)} budgeted for Lithium-ion`,
+                    '0% performance degradation — the capacity you contract in year 1 is the capacity you hold in year 60',
+                    'Built on a 100m Welsh hillside with a 60% smaller footprint than conventional hydro — and zero exposure to battery supply chains',
+                  ].map((line) => (
+                    <div key={line} className="flex items-start gap-1.5">
+                      <CircleCheck
+                        size={12}
+                        className="mt-0.5 shrink-0 text-[#CCFF00]"
+                        aria-hidden="true"
+                      />
+                      {line}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 
-            {/* ---- 8. The bottom line: figures-backed close ---- */}
-            <div className="border-2 border-[#CCFF00] bg-[#CCFF00]/5 p-5">
-              <div className="mb-1 flex items-center gap-2">
-                <Zap size={16} className="text-[#CCFF00]" aria-hidden="true" />
-                <h2 className="text-sm font-black uppercase tracking-wide text-white">
-                  The Bottom Line — Why HD Hydro Wins Here
-                </h2>
-              </div>
-              <p className="mb-4 text-xs text-slate-400">
-                Your configuration: {fmtMW(storageMW)} / {fmtMWh(energyCapMWh)} store at{' '}
-                {preset.label}, evaluated over {years} years.
-              </p>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-                <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
-                  <div
-                    className={`rhe-glow font-mono text-xl font-black ${
-                      lifetimeSavings >= 0 ? 'text-[#CCFF00]' : 'text-amber-500'
-                    }`}
-                  >
-                    {fmtMillions(lifetimeSavings)}
-                  </div>
-                  <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Cash saved vs Lithium-ion over {years} years
-                  </div>
-                </div>
-                <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
-                  <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
-                    {investment.irr !== null
-                      ? `${(investment.irr * 100).toFixed(1)}%`
-                      : `${Math.max(0, hdAdvantagePct).toFixed(0)}%`}
-                  </div>
-                  <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    {investment.irr !== null
-                      ? 'IRR on the upfront premium vs Li-ion'
-                      : 'Lower cost per MWh than Lithium-ion'}
-                  </div>
-                </div>
-                <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
-                  <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
-                    {presetId === 'anglesey'
-                      ? `+${(simDay.firmingFactor - simDay.bareCoverage).toFixed(0)}pts`
-                      : `−${(simDay.peakGridBefore - simDay.peakGridAfter).toFixed(0)}pts`}
-                  </div>
-                  <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    {presetId === 'anglesey'
-                      ? `Continuous green power (${simDay.bareCoverage.toFixed(0)}% → ${simDay.firmingFactor.toFixed(0)}%)`
-                      : `Peak-price grid exposure (${simDay.peakGridBefore.toFixed(0)}% → ${simDay.peakGridAfter.toFixed(0)}%)`}
-                  </div>
-                </div>
-                <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
-                  <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
-                    {annualCurtailmentGWh.toFixed(1)} GWh
-                  </div>
-                  <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Surplus power captured per year, not curtailed
-                  </div>
-                </div>
-                <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
-                  <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
-                    {fmtTonnes(annualCO2Avoided)}
-                  </div>
-                  <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    CO₂e avoided each year vs gas-fired firming
-                  </div>
-                </div>
-              </div>
-              <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-1.5 text-[11px] leading-snug text-slate-400 sm:grid-cols-2">
-                {[
-                  `One build, ${TECH.hdHydro.lifeYears} years of service — at ${fmtPerMWh(lcos.hdHydro)} vs ${fmtPerMWh(lcos.lithium)} for Lithium-ion at your design`,
-                  `£0 of stack-replacement liability vs ${fmtMillions(reinvestmentLiability)} budgeted for Lithium-ion`,
-                  '0% performance degradation — the capacity you contract in year 1 is the capacity you hold in year 60',
-                  'Built on a 100m Welsh hillside with a 60% smaller footprint than conventional hydro — and zero exposure to battery supply chains',
-                ].map((line) => (
-                  <div key={line} className="flex items-start gap-1.5">
-                    <CircleCheck
-                      size={12}
-                      className="mt-0.5 shrink-0 text-[#CCFF00]"
-                      aria-hidden="true"
-                    />
-                    {line}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* ---- 9. Assumptions disclosure ---- */}
+            {/* ---- Reference drawers ---- */}
             <details className="group border border-slate-800 bg-[#121824]">
-              <summary className="cursor-pointer select-none px-5 py-3 text-xs font-bold uppercase tracking-[0.15em] text-slate-400 transition-colors hover:text-slate-200">
+              <summary className="flex cursor-pointer select-none items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-[0.15em] text-slate-400 transition-colors hover:text-slate-200">
+                <Scale size={13} aria-hidden="true" />
+                Straight Talk — when each technology is the right call
+              </summary>
+              <div className="border-t border-slate-800 p-5">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="border border-slate-700 p-3">
+                    <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Where Lithium-ion is the right call
+                    </div>
+                    <ul className="space-y-1.5 text-[11px] leading-snug text-slate-500">
+                      {[
+                        'Durations of ~6 hours or less',
+                        'Power needed on-grid within ~24 months',
+                        'Revenue built on rapid frequency response',
+                        'Small or urban sites with no usable hill',
+                      ].map((item) => (
+                        <li key={item} className="flex items-start gap-1.5">
+                          <CircleCheck
+                            size={12}
+                            className="mt-0.5 shrink-0 text-slate-500"
+                            aria-hidden="true"
+                          />
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="border border-[#CCFF00]/40 bg-[#CCFF00]/5 p-3">
+                    <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[#CCFF00]">
+                      Where HD Hydro is the right call
+                    </div>
+                    <ul className="space-y-1.5 text-[11px] leading-snug text-slate-400">
+                      {[
+                        'Firming for 8+ hours, day after day',
+                        'Contracts and horizons of 20+ years',
+                        'Zero-degradation contracted capacity',
+                        'A hedge against cell-price & supply-chain risk',
+                      ].map((item) => (
+                        <li key={item} className="flex items-start gap-1.5">
+                          <CircleCheck
+                            size={12}
+                            className="mt-0.5 shrink-0 text-[#CCFF00]"
+                            aria-hidden="true"
+                          />
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+                <p className="mt-3 text-[11px] leading-snug text-slate-500">
+                  The strongest portfolios use both: a fast battery for power services,
+                  co-located with HD Hydro for deep, zero-degradation energy. We're happy to
+                  design the hybrid.
+                </p>
+              </div>
+            </details>
+
+            <details className="group border border-slate-800 bg-[#121824]">
+              <summary className="flex cursor-pointer select-none items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-[0.15em] text-slate-400 transition-colors hover:text-slate-200">
+                <BadgeCheck size={13} aria-hidden="true" />
                 Our Modelling Assumptions — open book
               </summary>
               <div className="grid grid-cols-1 gap-4 border-t border-slate-800 p-5 text-[11px] leading-relaxed text-slate-500 sm:grid-cols-3">
@@ -1747,12 +1773,13 @@ export default function FirmingCalculator() {
     {/* ============ PRINT-ONLY ONE-PAGE SUMMARY ============ */}
     <div className="hidden bg-white p-8 font-sans text-slate-900 print:block">
       <div className="flex items-center justify-between border-b-4 border-[#9BC400] pb-3">
-        <div>
-          <div className="text-2xl font-black uppercase tracking-wider">
-            Rhe<span className="text-[#7A9E00]">Energise</span>
-          </div>
-          <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">
-            HD Hydro · Firming &amp; Storage Proposal Summary
+        <div className="flex items-center gap-2">
+          <RheBlobMark blob="#9BC400" text="#ffffff" size={48} />
+          <div>
+            <div className="text-2xl font-bold tracking-tight">Energise</div>
+            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">
+              HD Hydro · Firming &amp; Storage Proposal Summary
+            </div>
           </div>
         </div>
         <div className="text-right text-[11px] text-slate-500">
