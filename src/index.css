@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+@theme {
+  --color-rhe-bg: #0f172a;
+  --color-rhe-panel: #121824;
+  --color-rhe-neon: #ccff00;
+  --color-rhe-lime: #99ff00;
+  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+html,
+body {
+  background-color: #0f172a;
+  color: #e2e8f0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- RheEnergise branded range sliders ---- */
+.rhe-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    #ccff00 0%,
+    #ccff00 var(--fill, 50%),
+    #334155 var(--fill, 50%),
+    #334155 100%
+  );
+  outline: none;
+  cursor: pointer;
+}
+
+.rhe-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ccff00;
+  border: 3px solid #0f172a;
+  box-shadow: 0 0 0 1.5px #ccff00, 0 0 12px rgba(204, 255, 0, 0.45);
+  transition: box-shadow 120ms ease;
+}
+
+.rhe-slider::-webkit-slider-thumb:hover,
+.rhe-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 1.5px #ccff00, 0 0 20px rgba(204, 255, 0, 0.8);
+}
+
+.rhe-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ccff00;
+  border: 3px solid #0f172a;
+  box-shadow: 0 0 0 1.5px #ccff00, 0 0 12px rgba(204, 255, 0, 0.45);
+}
+
+.rhe-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: #334155;
+}
+
+.rhe-slider::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: #ccff00;
+}
+
+/* Subtle glow utility for hero metrics */
+.rhe-glow {
+  text-shadow: 0 0 18px rgba(204, 255, 0, 0.35);
+}
