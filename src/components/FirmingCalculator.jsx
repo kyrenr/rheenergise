@@ -754,6 +754,7 @@ export default function FirmingCalculator() {
 
   const storageVsDemand = storageMW / Math.max(demandMW, 1)
   const capFloorEligible = durationHours >= 8
+  const hdCapex = techCapex('hdHydro', storageMW, durationHours)
 
   const advice =
     durationHours <= 5
@@ -981,6 +982,14 @@ export default function FirmingCalculator() {
                 </div>
                 <div className="mt-1 text-center text-[10px] uppercase tracking-wider text-slate-500">
                   Power Rating · Energy Capacity
+                </div>
+                <div className="mt-2 border-t border-slate-800 pt-2 text-center">
+                  <span className="font-mono text-sm font-bold text-slate-200">
+                    {fmtMillions(hdCapex)}
+                  </span>
+                  <span className="ml-1.5 text-[10px] uppercase tracking-wider text-slate-500">
+                    indicative build cost (£{Math.round(hdCapex / (storageMW * 1000)).toLocaleString('en-GB')}/kW)
+                  </span>
                 </div>
                 <p className="mt-2 text-[11px] leading-snug text-slate-500">
                   {storageVsDemand >= 1
@@ -1582,9 +1591,106 @@ export default function FirmingCalculator() {
               </div>
             </div>
 
-            {/* ---- 04 · The bottom line ---- */}
+            {/* ---- 04 · The honest pitch ---- */}
             <div className="space-y-4">
-              <SectionHeader n="04" title="The Bottom Line" cue="why HD Hydro, in your numbers" />
+              <SectionHeader
+                n="04"
+                title="The Honest Pitch"
+                cue="the three questions every buyer asks — answered straight"
+              />
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                {/* Q1: competing without disparaging */}
+                <div className="border border-slate-700 bg-[#121824] p-4">
+                  <div className="mb-2 flex items-center gap-2">
+                    <Scale size={14} className="text-slate-400" aria-hidden="true" />
+                    <div className="text-[11px] font-black uppercase tracking-wider text-slate-300">
+                      How we compete with Li-ion
+                    </div>
+                  </div>
+                  <ul className="space-y-2 text-[11px] leading-snug text-slate-400">
+                    {[
+                      'We model Lithium-ion at today’s best prices — and hand you the dial to make it cheaper still',
+                      'We concede short duration openly: below ~6 hours, buy the battery',
+                      'We count their augmentation the way their own service agreements do — a planned cost, not a scare story',
+                      'And we sell the hybrid: their battery for power services, our store for deep energy',
+                    ].map((item) => (
+                      <li key={item} className="flex items-start gap-1.5">
+                        <CircleCheck
+                          size={12}
+                          className="mt-0.5 shrink-0 text-slate-500"
+                          aria-hidden="true"
+                        />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Q2: the honest case */}
+                <div className="border border-[#CCFF00]/50 bg-[#CCFF00]/5 p-4">
+                  <div className="mb-2 flex items-center gap-2">
+                    <TrendingUp size={14} className="text-[#CCFF00]" aria-hidden="true" />
+                    <div className="text-[11px] font-black uppercase tracking-wider text-[#CCFF00]">
+                      The honest case for HD Hydro
+                    </div>
+                  </div>
+                  <ul className="space-y-2 text-[11px] leading-snug text-slate-300">
+                    {[
+                      `Physics, not price forecasts: hours = tanks + fluid, not cells — ${fmtPerMWh(lcos.hdHydro)} vs ${fmtPerMWh(lcos.lithium)} at your design`,
+                      `Certainty as the product: 0% degradation, £0 augmentation vs ${fmtMillions(reinvestmentLiability)} over ${years} years`,
+                      'A 60-year asset with residual value long after a battery is recycled',
+                      'A hedge: costs are steel, civils and fluid — uncorrelated with cell markets',
+                    ].map((item) => (
+                      <li key={item} className="flex items-start gap-1.5">
+                        <CircleCheck
+                          size={12}
+                          className="mt-0.5 shrink-0 text-[#CCFF00]"
+                          aria-hidden="true"
+                        />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Q3: when HD Hydro is not the answer */}
+                <div className="border border-amber-500/40 bg-amber-500/5 p-4">
+                  <div className="mb-2 flex items-center gap-2">
+                    <AlertTriangle size={14} className="text-amber-500" aria-hidden="true" />
+                    <div className="text-[11px] font-black uppercase tracking-wider text-amber-400">
+                      When we’re not the answer
+                    </div>
+                  </div>
+                  <ul className="space-y-2 text-[11px] leading-snug text-slate-400">
+                    {[
+                      'Below ~6 hours of discharge duration',
+                      'Power needed on-grid inside ~24 months',
+                      'No 100m hill within reach of the connection',
+                      'Revenue built on sub-second frequency response',
+                    ].map((item) => (
+                      <li key={item} className="flex items-start gap-1.5">
+                        <CircleCheck
+                          size={12}
+                          className="mt-0.5 shrink-0 text-amber-500/70"
+                          aria-hidden="true"
+                        />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2.5 border-t border-amber-500/20 pt-2 text-[11px] italic leading-snug text-slate-500">
+                    And we’re candid about maturity: Li-ion is gigawatt-proven; HD Hydro is
+                    demonstrator-proven with its first commercial fleet in development —
+                    which is why we anchor deals in cap-and-floor revenue protection and
+                    contracted capacity guarantees, not promises.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* ---- 05 · The bottom line ---- */}
+            <div className="space-y-4">
+              <SectionHeader n="05" title="The Bottom Line" cue="why HD Hydro, in your numbers" />
               <div className="border-2 border-[#CCFF00] bg-[#CCFF00]/5 p-5">
                 <div
                   className={`text-sm font-black uppercase tracking-wide ${
@@ -1670,67 +1776,7 @@ export default function FirmingCalculator() {
               </div>
             </div>
 
-            {/* ---- Reference drawers ---- */}
-            <details className="group border border-slate-800 bg-[#121824]">
-              <summary className="flex cursor-pointer select-none items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-[0.15em] text-slate-400 transition-colors hover:text-slate-200">
-                <Scale size={13} aria-hidden="true" />
-                Straight Talk — when each technology is the right call
-              </summary>
-              <div className="border-t border-slate-800 p-5">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="border border-slate-700 p-3">
-                    <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                      Where Lithium-ion is the right call
-                    </div>
-                    <ul className="space-y-1.5 text-[11px] leading-snug text-slate-500">
-                      {[
-                        'Durations of ~6 hours or less',
-                        'Power needed on-grid within ~24 months',
-                        'Revenue built on rapid frequency response',
-                        'Small or urban sites with no usable hill',
-                      ].map((item) => (
-                        <li key={item} className="flex items-start gap-1.5">
-                          <CircleCheck
-                            size={12}
-                            className="mt-0.5 shrink-0 text-slate-500"
-                            aria-hidden="true"
-                          />
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div className="border border-[#CCFF00]/40 bg-[#CCFF00]/5 p-3">
-                    <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[#CCFF00]">
-                      Where HD Hydro is the right call
-                    </div>
-                    <ul className="space-y-1.5 text-[11px] leading-snug text-slate-400">
-                      {[
-                        'Firming for 8+ hours, day after day',
-                        'Contracts and horizons of 20+ years',
-                        'Zero-degradation contracted capacity',
-                        'A hedge against cell-price & supply-chain risk',
-                      ].map((item) => (
-                        <li key={item} className="flex items-start gap-1.5">
-                          <CircleCheck
-                            size={12}
-                            className="mt-0.5 shrink-0 text-[#CCFF00]"
-                            aria-hidden="true"
-                          />
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-                <p className="mt-3 text-[11px] leading-snug text-slate-500">
-                  The strongest portfolios use both: a fast battery for power services,
-                  co-located with HD Hydro for deep, zero-degradation energy. We're happy to
-                  design the hybrid.
-                </p>
-              </div>
-            </details>
-
+            {/* ---- Reference drawer ---- */}
             <details className="group border border-slate-800 bg-[#121824]">
               <summary className="flex cursor-pointer select-none items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-[0.15em] text-slate-400 transition-colors hover:text-slate-200">
                 <BadgeCheck size={13} aria-hidden="true" />
@@ -1756,7 +1802,9 @@ export default function FirmingCalculator() {
                   O&amp;M · 330 cycles/yr · your selected cost of capital ({discountPct}%)
                   applied equally · CO₂e at {GAS_CO2_T_PER_MWH} t/MWh vs unabated gas firming ·
                   winter week: 3-day wind lull at ~25% output, solar at 35% seasonal · IRR
-                  &amp; cash chart undiscounted GBP, real terms.
+                  &amp; cash chart undiscounted GBP, real terms · cost-only comparison —
+                  revenue stacking is deliberately out of scope (batteries monetise
+                  frequency response; LDES monetises firm capacity and revenue floors).
                 </div>
               </div>
             </details>
@@ -1799,7 +1847,7 @@ export default function FirmingCalculator() {
           ['Discharge Duration', `${durationHours} hours`],
           ['Evaluation Window', `${years} years`],
           ['Cost of Capital', `${discountPct}%`],
-          ['Li-ion Price Outlook', liOutlook.label],
+          ['Indicative Build Cost', fmtMillions(hdCapex)],
           [
             'Ofgem LDES Cap & Floor',
             capFloorEligible ? 'Meets 8h threshold — eligible to apply' : 'Below 8h threshold',
