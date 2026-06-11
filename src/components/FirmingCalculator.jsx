@@ -363,7 +363,7 @@ const PRESETS = {
     windShape: INLAND_WIND,
     demandProfile: 'industrial',
     kpi: 'peak',
-    kpiName: 'Peak grid exposure',
+    kpiName: 'Peak demand self-supplied',
     loadDescription: 'Manufacturing load shielded from peak network charges',
     gridChargingAllowed: true,
   },
@@ -947,8 +947,11 @@ export default function FirmingCalculator() {
             body: 'Volumetric efficiency and a 60-year infrastructure lifecycle mean RheEnergise provides the lowest cost, zero-degradation baseload hedge on the market.',
           }
 
-  const kpiBefore = preset.kpi === 'green' ? sim.bareCoverage : sim.peakGridBefore
-  const kpiAfter = preset.kpi === 'green' ? sim.firmingFactor : sim.peakGridAfter
+  // Both KPIs are framed "higher is better": green coverage for export/24-7
+  // buyers, and peak demand self-supplied (100 − peak-price grid exposure)
+  // for industrial buyers.
+  const kpiBefore = preset.kpi === 'green' ? sim.bareCoverage : 100 - sim.peakGridBefore
+  const kpiAfter = preset.kpi === 'green' ? sim.firmingFactor : 100 - sim.peakGridAfter
 
   return (
     <>
@@ -1258,7 +1261,7 @@ export default function FirmingCalculator() {
                           {kpiBefore.toFixed(0)}%
                         </div>
                         <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-slate-600">
-                          {preset.kpi === 'green' ? 'Green, no storage' : 'Peak draw, no storage'}
+                          {preset.kpi === 'green' ? 'Green, no storage' : 'Self-supplied, no storage'}
                         </div>
                       </div>
                       <div className="flex items-center text-slate-500" aria-hidden="true">
@@ -1954,12 +1957,12 @@ export default function FirmingCalculator() {
                     <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
                       {preset.kpi === 'green'
                         ? `+${(simYear.firmingFactor - simYear.bareCoverage).toFixed(0)}pts`
-                        : `−${(simYear.peakGridBefore - simYear.peakGridAfter).toFixed(0)}pts`}
+                        : `+${(simYear.peakGridBefore - simYear.peakGridAfter).toFixed(0)}pts`}
                     </div>
                     <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                       {preset.kpi === 'green'
                         ? `${preset.kpiName} (${simYear.bareCoverage.toFixed(0)}% → ${simYear.firmingFactor.toFixed(0)}%)`
-                        : `Peak-price grid exposure (${simYear.peakGridBefore.toFixed(0)}% → ${simYear.peakGridAfter.toFixed(0)}%)`}
+                        : `${preset.kpiName} (${(100 - simYear.peakGridBefore).toFixed(0)}% → ${(100 - simYear.peakGridAfter).toFixed(0)}%)`}
                     </div>
                   </div>
                   <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
@@ -2097,12 +2100,10 @@ export default function FirmingCalculator() {
           <div className="font-mono text-2xl font-black text-[#5C7A00]">
             {preset.kpi === 'green'
               ? `${simYear.bareCoverage.toFixed(0)}% → ${simYear.firmingFactor.toFixed(0)}%`
-              : `${simYear.peakGridBefore.toFixed(0)}% → ${simYear.peakGridAfter.toFixed(0)}%`}
+              : `${(100 - simYear.peakGridBefore).toFixed(0)}% → ${(100 - simYear.peakGridAfter).toFixed(0)}%`}
           </div>
           <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">
-            {preset.kpi === 'green'
-              ? `${preset.kpiName}, without → with HD Hydro`
-              : 'Peak-price grid draw, without → with HD Hydro'}
+            {`${preset.kpiName}, without → with HD Hydro`}
           </div>
         </div>
         <div className="border-2 border-[#9BC400] bg-[#F5FBE0] p-3">
