@@ -76,6 +76,22 @@ body {
   text-shadow: 0 0 18px rgba(204, 255, 0, 0.35);
 }
 
+/* Slim branded scrollbar for the independently-scrolling input panel */
+.rhe-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}
+.rhe-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.rhe-scroll::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+.rhe-scroll::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
 /* One-page A4 export via the browser's print-to-PDF */
 @media print {
   @page {

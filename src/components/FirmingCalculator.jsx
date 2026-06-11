@@ -17,7 +17,9 @@ import {
   AlertTriangle,
   ArrowRight,
   BadgeCheck,
+  Banknote,
   BatteryCharging,
+  Building2,
   CalendarRange,
   CircleCheck,
   Clock,
@@ -26,7 +28,6 @@ import {
   Landmark,
   Leaf,
   Link2,
-  MapPin,
   Mountain,
   Percent,
   PiggyBank,
@@ -34,6 +35,7 @@ import {
   RefreshCcw,
   RotateCcw,
   Scale,
+  Server,
   ShieldCheck,
   Snowflake,
   Sun,
@@ -283,55 +285,115 @@ function hdVsLiInvestmentCase(powerMW, durationHours, years, liFactor) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  NORTH WALES LOCATION PRESETS                                       */
+/*  BUYER ARCHETYPES                                                   */
+/*  Each archetype carries its own North Wales project profile (the    */
+/*  physics: wind/solar shape, demand pattern, grid interaction) and a  */
+/*  client-facing narrative. Selecting one re-skins the whole story;    */
+/*  it never overrides the buyer's own financial sliders.               */
 /* ------------------------------------------------------------------ */
 
+// Gusty coastal profile — big overnight & evening spikes, deep midday lull.
+const COASTAL_WIND = [
+  0.7, 0.78, 0.85, 0.9, 0.85, 0.75, 0.6, 0.42, 0.25, 0.15, 0.12, 0.1, 0.1,
+  0.12, 0.15, 0.2, 0.35, 0.55, 0.75, 0.9, 0.95, 0.92, 0.85, 0.78,
+]
+// Steadier inland profile.
+const INLAND_WIND = [
+  0.4, 0.42, 0.45, 0.48, 0.5, 0.48, 0.44, 0.4, 0.36, 0.33, 0.3, 0.28, 0.28,
+  0.3, 0.33, 0.36, 0.4, 0.44, 0.48, 0.52, 0.5, 0.47, 0.44, 0.42,
+]
+
 const PRESETS = {
-  anglesey: {
-    id: 'anglesey',
-    label: 'Anglesey Co-located Hub',
-    tagline: 'Coastal wind & solar · firm green export',
-    icon: MapPin,
-    defaultWindMW: 120,
-    defaultSolarMW: 40,
-    defaultDemandMW: 50,
+  utility: {
+    id: 'utility',
+    label: 'Utility / IPP',
+    tagline: 'Owns generation, wants to own storage',
+    values:
+      'Turn an intermittent wind & solar portfolio into a firm, dispatchable green product you own outright and sell at a premium.',
+    icon: Building2,
+    defaultWindMW: 180,
+    defaultSolarMW: 60,
+    defaultDemandMW: 90,
     demandLabel: 'Contracted Firm Block',
-    demandSublabel: 'The 24/7 green block you sell to your offtaker',
-    windCapacityFactor: 0.42, // high coastal wind
+    demandSublabel: 'The firm green block you sell to your offtaker',
+    windCapacityFactor: 0.42,
     solarPeakShare: 0.75,
-    // Gusty coastal profile — big overnight & evening spikes, deep midday lull.
-    windShape: [
-      0.7, 0.78, 0.85, 0.9, 0.85, 0.75, 0.6, 0.42, 0.25, 0.15, 0.12, 0.1, 0.1,
-      0.12, 0.15, 0.2, 0.35, 0.55, 0.75, 0.9, 0.95, 0.92, 0.85, 0.78,
-    ],
-    loadDescription: 'Firm 24h green export block sold at a premium',
+    windShape: COASTAL_WIND,
+    demandProfile: 'flat',
+    kpi: 'green',
+    kpiName: 'Firm green output',
+    loadDescription: 'Firming a wind & solar portfolio into a firm, sellable green block',
     gridChargingAllowed: false,
   },
-  deeside: {
-    id: 'deeside',
-    label: 'Deeside Industrial Firming',
-    tagline: 'Virtual PPA · grid-connected factory firming',
+  infraFund: {
+    id: 'infraFund',
+    label: 'Infrastructure fund',
+    tagline: 'Seeks long-life infrastructure assets',
+    values:
+      'A 60-year, zero-degradation asset with contracted cashflows — the long-duration infrastructure profile capital is hunting for.',
+    icon: Banknote,
+    defaultWindMW: 200,
+    defaultSolarMW: 120,
+    defaultDemandMW: 110,
+    demandLabel: 'Contracted Output',
+    demandSublabel: 'The firm capacity your offtake contract underwrites',
+    windCapacityFactor: 0.42,
+    solarPeakShare: 0.75,
+    windShape: COASTAL_WIND,
+    demandProfile: 'flat',
+    kpi: 'green',
+    kpiName: 'Firm contracted output',
+    loadDescription: 'A bankable firming asset delivering contracted green output',
+    gridChargingAllowed: false,
+  },
+  industrial: {
+    id: 'industrial',
+    label: 'Industrial energy owner',
+    tagline: 'Mining, cement, heavy industry with capital',
+    values:
+      'Self-owned clean power that shields your operation from volatile peak network charges and carbon exposure.',
     icon: Factory,
     defaultWindMW: 40,
     defaultSolarMW: 60,
     defaultDemandMW: 70,
-    demandLabel: 'Factory Peak Demand',
+    demandLabel: 'Site Peak Demand',
     demandSublabel: 'Your site’s maximum draw during day shifts',
-    windCapacityFactor: 0.33, // steadier inland wind
+    windCapacityFactor: 0.33,
     solarPeakShare: 0.72,
-    windShape: [
-      0.4, 0.42, 0.45, 0.48, 0.5, 0.48, 0.44, 0.4, 0.36, 0.33, 0.3, 0.28, 0.28,
-      0.3, 0.33, 0.36, 0.4, 0.44, 0.48, 0.52, 0.5, 0.47, 0.44, 0.42,
-    ],
+    windShape: INLAND_WIND,
+    demandProfile: 'industrial',
+    kpi: 'peak',
+    kpiName: 'Peak grid exposure',
     loadDescription: 'Manufacturing load shielded from peak network charges',
-    gridChargingAllowed: true, // hillside store soaks up cheap off-peak grid power
+    gridChargingAllowed: true,
+  },
+  corporate: {
+    id: 'corporate',
+    label: 'Corporate / data centre',
+    tagline: 'Hyperscalers needing 24/7 clean power',
+    values:
+      'Round-the-clock carbon-free energy, matched hour-by-hour — the 24/7 CFE standard hyperscalers now demand.',
+    icon: Server,
+    defaultWindMW: 170,
+    defaultSolarMW: 110,
+    defaultDemandMW: 100,
+    demandLabel: 'Continuous IT Load',
+    demandSublabel: 'Your flat, round-the-clock data-centre demand',
+    windCapacityFactor: 0.42,
+    solarPeakShare: 0.75,
+    windShape: COASTAL_WIND,
+    demandProfile: 'flat',
+    kpi: 'green',
+    kpiName: '24/7 carbon-free energy',
+    loadDescription: 'Matching a flat 24/7 data-centre load with round-the-clock clean power',
+    gridChargingAllowed: false,
   },
 }
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h)
 const OFF_PEAK = (h) => h <= 5 || h === 23
 
-// Industrial day-shift demand shape for Deeside (peaks 07:00–18:00).
+// Industrial day-shift demand shape (peaks 07:00–18:00).
 const INDUSTRIAL_SHAPE = HOURS.map((h) => {
   if (h >= 7 && h <= 18) return 1
   if (h >= 19 && h <= 21) return 0.7
@@ -344,10 +406,10 @@ function solarShape(h, peakShare) {
 }
 
 // Winter stress week: windy start, a three-day wind lull mid-week, weak
-// seasonal solar, and a quieter factory weekend at Deeside.
+// seasonal solar, and a quieter industrial weekend.
 const WINTER_WIND_DAY_FACTORS = [1.2, 1.15, 0.9, 0.3, 0.22, 0.6, 1.1]
 const WINTER_SOLAR_FACTOR = 0.35
-const WEEK_DEMAND_FACTORS = [1, 1, 1, 1, 1, 0.75, 0.7] // Deeside weekend only
+const WEEK_DEMAND_FACTORS = [1, 1, 1, 1, 1, 0.75, 0.7] // industrial weekend only
 
 /* ------------------------------------------------------------------ */
 /*  STORAGE SIMULATION (any horizon)                                   */
@@ -360,9 +422,9 @@ function buildDayProfiles(preset, windMW, solarMW, demandMW) {
   )
   const solar = HOURS.map((h) => solarMW * solarShape(h, preset.solarPeakShare))
   const load =
-    preset.id === 'anglesey'
-      ? HOURS.map(() => demandMW)
-      : INDUSTRIAL_SHAPE.map((s) => s * demandMW)
+    preset.demandProfile === 'industrial'
+      ? INDUSTRIAL_SHAPE.map((s) => s * demandMW)
+      : HOURS.map(() => demandMW)
   const labels = HOURS.map((h) => `${String(h).padStart(2, '0')}:00`)
   return { wind, solar, load, labels }
 }
@@ -377,7 +439,11 @@ function buildWeekProfiles(preset, windMW, solarMW, demandMW) {
     for (const h of HOURS) {
       wind.push(Math.min(windMW, day.wind[h] * WINTER_WIND_DAY_FACTORS[d]))
       solar.push(day.solar[h] * WINTER_SOLAR_FACTOR)
-      load.push(preset.id === 'deeside' ? day.load[h] * WEEK_DEMAND_FACTORS[d] : day.load[h])
+      load.push(
+        preset.demandProfile === 'industrial'
+          ? day.load[h] * WEEK_DEMAND_FACTORS[d]
+          : day.load[h],
+      )
       labels.push(`D${d + 1} ${String(h).padStart(2, '0')}:00`)
     }
   }
@@ -603,7 +669,7 @@ function initialStateFromUrl() {
     const v = Number(raw)
     return raw !== null && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : def
   }
-  const presetId = PRESETS[q.get('p')] ? q.get('p') : 'anglesey'
+  const presetId = PRESETS[q.get('p')] ? q.get('p') : 'utility'
   const d = PRESETS[presetId]
   return {
     presetId,
@@ -881,8 +947,8 @@ export default function FirmingCalculator() {
             body: 'Volumetric efficiency and a 60-year infrastructure lifecycle mean RheEnergise provides the lowest cost, zero-degradation baseload hedge on the market.',
           }
 
-  const kpiBefore = presetId === 'anglesey' ? sim.bareCoverage : sim.peakGridBefore
-  const kpiAfter = presetId === 'anglesey' ? sim.firmingFactor : sim.peakGridAfter
+  const kpiBefore = preset.kpi === 'green' ? sim.bareCoverage : sim.peakGridBefore
+  const kpiAfter = preset.kpi === 'green' ? sim.firmingFactor : sim.peakGridAfter
 
   return (
     <>
@@ -929,7 +995,7 @@ export default function FirmingCalculator() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
           {/* ============ LEFT: DESIGN YOUR SYSTEM ============ */}
           <section className="lg:col-span-4" aria-label="Design your system">
-            <div className="border border-slate-800 bg-[#121824] p-5 lg:sticky lg:top-4">
+            <div className="border border-slate-800 bg-[#121824] p-5 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto rhe-scroll">
               <div className="mb-1 flex items-center justify-between">
                 <h2 className="text-base font-bold text-white">Design Your System</h2>
                 <button
@@ -941,12 +1007,12 @@ export default function FirmingCalculator() {
                 </button>
               </div>
               <p className="mb-5 text-xs text-slate-500">
-                Start with what you need to power. Everything on the right updates live.
+                Start with who you’re building for. Everything on the right updates live.
               </p>
 
-              {/* Location */}
-              <PanelTitle step="1" title="Choose Your Location" />
-              <div className="mb-6 space-y-2">
+              {/* Buyer archetype */}
+              <PanelTitle step="1" title="Who Are You Building For?" />
+              <div className="mb-3 grid grid-cols-2 gap-2">
                 {Object.values(PRESETS).map((p) => {
                   const Icon = p.icon
                   const active = p.id === presetId
@@ -956,29 +1022,34 @@ export default function FirmingCalculator() {
                       type="button"
                       onClick={() => selectPreset(p.id)}
                       aria-pressed={active}
-                      className={`w-full border p-3 text-left transition-colors ${
+                      className={`flex flex-col items-start border p-3 text-left transition-colors ${
                         active
                           ? 'border-[#CCFF00] bg-[#CCFF00]/10'
                           : 'border-slate-700 bg-transparent hover:border-slate-500'
                       }`}
                     >
-                      <div className="flex items-center gap-2">
-                        <Icon
-                          size={16}
-                          className={active ? 'text-[#CCFF00]' : 'text-slate-500'}
-                          aria-hidden="true"
-                        />
-                        <span
-                          className={`text-sm font-bold ${active ? 'text-[#CCFF00]' : 'text-slate-300'}`}
-                        >
-                          {p.label}
-                        </span>
-                      </div>
-                      <div className="mt-1 pl-6 text-xs text-slate-500">{p.tagline}</div>
+                      <span
+                        className={`mb-2 flex h-8 w-8 items-center justify-center rounded-full ${
+                          active ? 'bg-[#CCFF00]/20 text-[#CCFF00]' : 'bg-slate-800 text-slate-400'
+                        }`}
+                      >
+                        <Icon size={16} aria-hidden="true" />
+                      </span>
+                      <span
+                        className={`text-xs font-bold leading-tight ${active ? 'text-[#CCFF00]' : 'text-slate-200'}`}
+                      >
+                        {p.label}
+                      </span>
+                      <span className="mt-0.5 text-[10px] italic leading-tight text-slate-500">
+                        {p.tagline}
+                      </span>
                     </button>
                   )
                 })}
               </div>
+              <p className="mb-6 border-l-2 border-[#CCFF00]/50 pl-2.5 text-[11px] leading-snug text-slate-400">
+                {preset.values}
+              </p>
 
               {/* Customer power need */}
               <PanelTitle step="2" title="Your Power Need" />
@@ -1119,7 +1190,7 @@ export default function FirmingCalculator() {
                   <span className="rhe-glow text-[#CCFF00]">{kpiAfter.toFixed(0)}%</span>
                 </div>
                 <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                  {presetId === 'anglesey' ? 'Continuous green power' : 'Peak grid exposure'}
+                  {preset.kpiName}
                 </div>
               </div>
               <div className="border border-slate-700 bg-[#121824] p-3 text-center">
@@ -1187,7 +1258,7 @@ export default function FirmingCalculator() {
                           {kpiBefore.toFixed(0)}%
                         </div>
                         <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-slate-600">
-                          {presetId === 'anglesey' ? 'Green, no storage' : 'Peak draw, no storage'}
+                          {preset.kpi === 'green' ? 'Green, no storage' : 'Peak draw, no storage'}
                         </div>
                       </div>
                       <div className="flex items-center text-slate-500" aria-hidden="true">
@@ -1334,7 +1405,7 @@ export default function FirmingCalculator() {
                   {viewMode === 'week' &&
                     ' Days 4–5 are a wind lull — slide the duration up to ride further into it.'}
                 </p>
-                {presetId === 'anglesey' && sim.genCoverage > 0 && sim.genCoverage < 0.95 && (
+                {preset.kpi === 'green' && sim.genCoverage > 0 && sim.genCoverage < 0.95 && (
                   <p className="mt-2 flex items-start gap-1.5 border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] leading-snug text-amber-400/90">
                     <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
                     {viewMode === 'week'
@@ -1881,13 +1952,13 @@ export default function FirmingCalculator() {
                   </div>
                   <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
                     <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
-                      {presetId === 'anglesey'
+                      {preset.kpi === 'green'
                         ? `+${(simYear.firmingFactor - simYear.bareCoverage).toFixed(0)}pts`
                         : `−${(simYear.peakGridBefore - simYear.peakGridAfter).toFixed(0)}pts`}
                     </div>
                     <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                      {presetId === 'anglesey'
-                        ? `Continuous green power (${simYear.bareCoverage.toFixed(0)}% → ${simYear.firmingFactor.toFixed(0)}%)`
+                      {preset.kpi === 'green'
+                        ? `${preset.kpiName} (${simYear.bareCoverage.toFixed(0)}% → ${simYear.firmingFactor.toFixed(0)}%)`
                         : `Peak-price grid exposure (${simYear.peakGridBefore.toFixed(0)}% → ${simYear.peakGridAfter.toFixed(0)}%)`}
                     </div>
                   </div>
@@ -2024,13 +2095,13 @@ export default function FirmingCalculator() {
       <div className="mt-1 grid grid-cols-3 gap-2 text-center">
         <div className="border-2 border-[#9BC400] bg-[#F5FBE0] p-3">
           <div className="font-mono text-2xl font-black text-[#5C7A00]">
-            {presetId === 'anglesey'
+            {preset.kpi === 'green'
               ? `${simYear.bareCoverage.toFixed(0)}% → ${simYear.firmingFactor.toFixed(0)}%`
               : `${simYear.peakGridBefore.toFixed(0)}% → ${simYear.peakGridAfter.toFixed(0)}%`}
           </div>
           <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">
-            {presetId === 'anglesey'
-              ? 'Continuous green power, without → with HD Hydro'
+            {preset.kpi === 'green'
+              ? `${preset.kpiName}, without → with HD Hydro`
               : 'Peak-price grid draw, without → with HD Hydro'}
           </div>
         </div>
