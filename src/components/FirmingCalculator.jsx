@@ -83,16 +83,37 @@ function RheBlobMark({ blob, text, size = 40 }) {
 /*  panel rendered at the bottom of the page.                          */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/*  HD HYDRO COST ANCHOR                                               */
+/*  RheEnergise published target: a 30 MWh reference system (250 m     */
+/*  head, ~6h duration) at ~$310/kWh project capex. Larger builds get  */
+/*  cheaper through economies of scale. Turbine-runner replacements    */
+/*  every ~5 years are provisioned at ~$1,600/MWh/yr inside OPEX.      */
+/* ------------------------------------------------------------------ */
+
+const USD_TO_GBP = 0.79
+const HD_REF_ENERGY_MWH = 30
+const HD_REF_COST_PER_KWH = 310 * USD_TO_GBP // ≈ £245/kWh at reference scale
+const HD_POWER_CAPEX_PER_KW = 840 // machinery share, calibrated at the 6h reference
+const HD_ENERGY_CAPEX_PER_KWH = HD_REF_COST_PER_KWH - HD_POWER_CAPEX_PER_KW / 6 // ≈ £105/kWh
+const HD_SCALE_EXPONENT = 0.92 // economies of scale on storage size
+const HD_SCALE_FLOOR = 0.7 // cost reduction capped at 30% below reference
+const HD_REPLACEMENT_PER_MWH_YEAR = 1600 * USD_TO_GBP // ≈ £1,264/MWh/yr in OPEX
+
+function hdScaleFactor(energyMWh) {
+  if (energyMWh <= 0) return 1
+  return Math.max(
+    HD_SCALE_FLOOR,
+    Math.pow(energyMWh / HD_REF_ENERGY_MWH, HD_SCALE_EXPONENT - 1),
+  )
+}
+
 const TECH = {
   hdHydro: {
     name: 'RheEnergise HD Hydro',
-    powerCapexPerKW: 850, // £/kW — pump-turbines, R-19 loop
-    energyCapexPerKWh: 125, // £/kWh — 60% smaller tanks & pipes vs water
-    fixedOMRate: 0.015, // % of capex per year
+    fixedOMRate: 0.01, // % of capex per year (runner provision added separately)
     rte: 0.8, // round-trip efficiency, flat for life
     lifeYears: 60,
-    refurbYear: 30, // machinery refurbishment provision
-    refurbCostShare: 0.15, // of initial capex, once, if window exceeds it
   },
   lithium: {
     name: 'Lithium-ion BESS',
@@ -137,9 +158,16 @@ function lithiumAugmentations(years) {
 
 function techCapex(techKey, powerMW, durationHours, liPriceFactor = 1) {
   const t = TECH[techKey]
+  const energyMWh = powerMW * durationHours
+  if (techKey === 'hdHydro') {
+    return (
+      (powerMW * 1000 * HD_POWER_CAPEX_PER_KW + energyMWh * 1000 * HD_ENERGY_CAPEX_PER_KWH) *
+      hdScaleFactor(energyMWh)
+    )
+  }
   const energyRate =
     techKey === 'lithium' ? t.energyCapexPerKWh * liPriceFactor : t.energyCapexPerKWh
-  return powerMW * 1000 * t.powerCapexPerKW + powerMW * durationHours * 1000 * energyRate
+  return powerMW * 1000 * t.powerCapexPerKW + energyMWh * 1000 * energyRate
 }
 
 /**
@@ -163,8 +191,8 @@ function calcLcos(techKey, powerMW, durationHours, years, { liFactor = 1, rate =
       years
     capacityFactor = t.avgCapacityFactor
   }
-  if (techKey === 'hdHydro' && years > t.refurbYear) {
-    annualCost += (t.refurbCostShare * capex) / years
+  if (techKey === 'hdHydro') {
+    annualCost += energyMWh * HD_REPLACEMENT_PER_MWH_YEAR // runner provision in OPEX
   }
 
   const annualDischargeMWh = CYCLES_PER_YEAR * energyMWh * t.rte * capacityFactor
@@ -187,8 +215,8 @@ function cashCostSchedule(techKey, powerMW, durationHours, years, liFactor = 1) 
       cost +=
         t.augmentationCostShare * powerMW * durationHours * 1000 * t.energyCapexPerKWh * liFactor
     }
-    if (techKey === 'hdHydro' && y === t.refurbYear && years > t.refurbYear) {
-      cost += t.refurbCostShare * capex
+    if (techKey === 'hdHydro') {
+      cost += powerMW * durationHours * HD_REPLACEMENT_PER_MWH_YEAR // runner provision
     }
     flows.push(cost)
   }
@@ -464,8 +492,80 @@ function runStorageSim(preset, profiles, storagePowerMW, durationHours) {
     peakGridAfter,
     dailyGreenCharge: greenIn / daysSimulated, // renewable surplus captured per day (MWh)
     dailyGreenServed: greenServed / daysSimulated, // green energy delivered per day (MWh)
+    dailyLoad: totalLoad / daysSimulated,
+    dailyDirect: directServed / daysSimulated,
+    dailyPeakLoad: peakLoad / daysSimulated,
     energyCapMWh,
     storagePowerMW,
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  ANNUAL (SEASONAL) VIEW                                             */
+/*  Twelve representative days, one per month, with UK seasonality —   */
+/*  normalised so the annual averages match the typical-day profiles.  */
+/* ------------------------------------------------------------------ */
+
+const normalise = (arr) => {
+  const mean = arr.reduce((a, b) => a + b, 0) / arr.length
+  return arr.map((v) => v / mean)
+}
+const WIND_MONTH_FACTORS = normalise([
+  1.25, 1.2, 1.1, 0.95, 0.85, 0.75, 0.7, 0.75, 0.95, 1.1, 1.2, 1.3,
+])
+const SOLAR_MONTH_FACTORS = normalise([
+  0.3, 0.45, 0.7, 1.0, 1.2, 1.25, 1.2, 1.05, 0.85, 0.55, 0.35, 0.25,
+])
+const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+function simulateYear(preset, windMW, solarMW, demandMW, storageMW, durationHours) {
+  const base = buildDayProfiles(preset, windMW, solarMW, demandMW)
+  const months = []
+  let loadSum = 0
+  let greenSum = 0
+  let directSum = 0
+  let curtailSum = 0
+  let genSum = 0
+  let peakLoadSum = 0
+  let peakBeforeSum = 0
+  let peakAfterSum = 0
+
+  for (let m = 0; m < 12; m += 1) {
+    const profiles = {
+      wind: base.wind.map((v) => Math.min(windMW, v * WIND_MONTH_FACTORS[m])),
+      solar: base.solar.map((v) => v * SOLAR_MONTH_FACTORS[m]),
+      load: base.load,
+      labels: base.labels,
+    }
+    const s = runStorageSim(preset, profiles, storageMW, durationHours)
+    const days = MONTH_DAYS[m]
+    const monthLoad = s.dailyLoad * days
+    months.push({
+      label: MONTH_LABELS[m],
+      direct: (s.dailyDirect * days) / 1000, // GWh
+      storage: (Math.max(0, s.dailyGreenServed - s.dailyDirect) * days) / 1000,
+      grid: (Math.max(0, s.dailyLoad - s.dailyGreenServed) * days) / 1000,
+    })
+    loadSum += monthLoad
+    greenSum += s.dailyGreenServed * days
+    directSum += s.dailyDirect * days
+    curtailSum += s.dailyGreenCharge * days
+    genSum += s.genCoverage * monthLoad
+    peakLoadSum += s.dailyPeakLoad * days
+    peakBeforeSum += (s.peakGridBefore / 100) * s.dailyPeakLoad * days
+    peakAfterSum += (s.peakGridAfter / 100) * s.dailyPeakLoad * days
+  }
+
+  return {
+    months,
+    firmingFactor: loadSum > 0 ? Math.min(100, (greenSum / loadSum) * 100) : 0,
+    bareCoverage: loadSum > 0 ? Math.min(100, (directSum / loadSum) * 100) : 0,
+    genCoverage: loadSum > 0 ? genSum / loadSum : 0,
+    peakGridBefore: peakLoadSum > 0 ? (peakBeforeSum / peakLoadSum) * 100 : 0,
+    peakGridAfter: peakLoadSum > 0 ? (peakAfterSum / peakLoadSum) * 100 : 0,
+    annualGreenServedMWh: greenSum,
+    annualCurtailMWh: curtailSum,
   }
 }
 
@@ -515,7 +615,7 @@ function initialStateFromUrl() {
     years: num('y', 25, 10, 60),
     discountPct: num('r', 7, 4, 12),
     liOutlookId: LI_OUTLOOKS.some((o) => o.id === q.get('li')) ? q.get('li') : 'flat',
-    viewMode: q.get('v') === 'week' ? 'week' : 'day',
+    viewMode: ['day', 'week', 'year'].includes(q.get('v')) ? q.get('v') : 'year',
   }
 }
 
@@ -698,7 +798,13 @@ export default function FirmingCalculator() {
     [viewMode, preset, windMW, solarMW, demandMW, storageMW, durationHours],
   )
 
-  const sim = viewMode === 'week' && simWeek ? simWeek : simDay
+  // Seasonal year always runs: it anchors the annual energy & CO2 figures.
+  const simYear = useMemo(
+    () => simulateYear(preset, windMW, solarMW, demandMW, storageMW, durationHours),
+    [preset, windMW, solarMW, demandMW, storageMW, durationHours],
+  )
+
+  const sim = viewMode === 'week' && simWeek ? simWeek : viewMode === 'year' ? simYear : simDay
 
   const lcos = useMemo(
     () => ({
@@ -749,8 +855,8 @@ export default function FirmingCalculator() {
     liOutlook.factor
   const hdAdvantagePct =
     lcos.lithium > 0 ? ((lcos.lithium - lcos.hdHydro) / lcos.lithium) * 100 : 0
-  const annualCO2Avoided = simDay.dailyGreenServed * 365 * GAS_CO2_T_PER_MWH
-  const annualCurtailmentGWh = (simDay.dailyGreenCharge * 365) / 1000
+  const annualCO2Avoided = simYear.annualGreenServedMWh * GAS_CO2_T_PER_MWH
+  const annualCurtailmentGWh = simYear.annualCurtailMWh / 1000
 
   const storageVsDemand = storageMW / Math.max(demandMW, 1)
   const capFloorEligible = durationHours >= 8
@@ -988,7 +1094,7 @@ export default function FirmingCalculator() {
                     {fmtMillions(hdCapex)}
                   </span>
                   <span className="ml-1.5 text-[10px] uppercase tracking-wider text-slate-500">
-                    indicative build cost (£{Math.round(hdCapex / (storageMW * 1000)).toLocaleString('en-GB')}/kW)
+                    indicative build cost · £{Math.round(hdCapex / (energyCapMWh * 1000)).toLocaleString('en-GB')}/kWh after economies of scale
                   </span>
                 </div>
                 <p className="mt-2 text-[11px] leading-snug text-slate-500">
@@ -1051,30 +1157,25 @@ export default function FirmingCalculator() {
               <div className="border border-slate-800 bg-[#121824] p-5">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setViewMode('day')}
-                      aria-pressed={viewMode === 'day'}
-                      className={`flex items-center gap-1.5 border px-2.5 py-1 text-[11px] font-bold transition-colors ${
-                        viewMode === 'day'
-                          ? 'border-[#CCFF00] bg-[#CCFF00]/10 text-[#CCFF00]'
-                          : 'border-slate-700 text-slate-500 hover:border-slate-500'
-                      }`}
-                    >
-                      <Clock size={12} aria-hidden="true" /> Typical Day
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setViewMode('week')}
-                      aria-pressed={viewMode === 'week'}
-                      className={`flex items-center gap-1.5 border px-2.5 py-1 text-[11px] font-bold transition-colors ${
-                        viewMode === 'week'
-                          ? 'border-[#CCFF00] bg-[#CCFF00]/10 text-[#CCFF00]'
-                          : 'border-slate-700 text-slate-500 hover:border-slate-500'
-                      }`}
-                    >
-                      <Snowflake size={12} aria-hidden="true" /> Winter Stress Week
-                    </button>
+                    {[
+                      { id: 'year', label: 'Full Year', Icon: CalendarRange },
+                      { id: 'day', label: 'Typical Day', Icon: Clock },
+                      { id: 'week', label: 'Winter Stress Week', Icon: Snowflake },
+                    ].map(({ id, label, Icon }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setViewMode(id)}
+                        aria-pressed={viewMode === id}
+                        className={`flex items-center gap-1.5 border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                          viewMode === id
+                            ? 'border-[#CCFF00] bg-[#CCFF00]/10 text-[#CCFF00]'
+                            : 'border-slate-700 text-slate-500 hover:border-slate-500'
+                        }`}
+                      >
+                        <Icon size={12} aria-hidden="true" /> {label}
+                      </button>
+                    ))}
                     <span className="font-mono text-[11px] text-slate-500">
                       {fmtMW(storageMW)} / {fmtMWh(energyCapMWh)} store
                     </span>
@@ -1105,6 +1206,55 @@ export default function FirmingCalculator() {
                 </div>
 
                 <div className="h-72">
+                  {viewMode === 'year' ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart
+                        data={simYear.months}
+                        margin={{ top: 5, right: 5, bottom: 0, left: -5 }}
+                      >
+                        <CartesianGrid stroke="#1E293B" vertical={false} />
+                        <XAxis
+                          dataKey="label"
+                          tick={{ fill: '#64748B', fontSize: 10 }}
+                          tickLine={false}
+                          axisLine={{ stroke: '#334155' }}
+                        />
+                        <YAxis
+                          tick={{ fill: '#64748B', fontSize: 10 }}
+                          tickLine={false}
+                          axisLine={false}
+                          label={{
+                            value: 'GWh',
+                            angle: -90,
+                            position: 'insideLeft',
+                            fill: '#64748B',
+                            fontSize: 10,
+                          }}
+                        />
+                        <Tooltip
+                          content={({ active, payload, label }) =>
+                            active && payload?.length ? (
+                              <div className="border border-slate-700 bg-[#0B1120] px-3 py-2 text-xs shadow-xl">
+                                <div className="mb-1 font-mono font-bold text-slate-300">{label}</div>
+                                {payload.map((p) => (
+                                  <div key={p.name} className="flex items-center justify-between gap-4">
+                                    <span style={{ color: p.color }}>{p.name}</span>
+                                    <span className="font-mono text-slate-200">
+                                      {p.value.toFixed(1)} GWh
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null
+                          }
+                        />
+                        <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} iconType="plainline" />
+                        <Bar name="Green, direct" dataKey="direct" stackId="e" fill={SKY} fillOpacity={0.65} />
+                        <Bar name="Green, via storage" dataKey="storage" stackId="e" fill={NEON} fillOpacity={0.9} />
+                        <Bar name="Grid / unmet" dataKey="grid" stackId="e" fill="#475569" />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={sim.day} margin={{ top: 5, right: 5, bottom: 0, left: -10 }}>
                       <CartesianGrid stroke="#1E293B" vertical={false} />
@@ -1175,10 +1325,12 @@ export default function FirmingCalculator() {
                       />
                     </ComposedChart>
                   </ResponsiveContainer>
+                  )}
                 </div>
                 <p className="mt-2 text-[11px] text-slate-500">
-                  Bright green: the store deploying through deficits. Dim green below the
-                  line: catching excess power that would otherwise be curtailed.
+                  {viewMode === 'year'
+                    ? 'Twelve months of energy with UK seasonality: demand served by renewables directly (blue), by the HD Hydro store (bright green), or left to the grid (grey). Watch the store carry the shoulder seasons.'
+                    : 'Bright green: the store deploying through deficits. Dim green below the line: catching excess power that would otherwise be curtailed.'}
                   {viewMode === 'week' &&
                     ' Days 4–5 are a wind lull — slide the duration up to ride further into it.'}
                 </p>
@@ -1187,7 +1339,7 @@ export default function FirmingCalculator() {
                     <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
                     {viewMode === 'week'
                       ? `In this winter week your generation produces ${(sim.genCoverage * 100).toFixed(0)}% of the energy you need — no store of any technology can bridge a multi-day lull alone. Deep duration extends the ride-through; extra generation closes the gap.`
-                      : `Your generation mix produces ${(sim.genCoverage * 100).toFixed(0)}% of your daily energy need. Storage firms what you generate — add wind or solar capacity to raise the green ceiling.`}
+                      : `Your generation mix produces ${(sim.genCoverage * 100).toFixed(0)}% of your ${viewMode === 'year' ? 'annual' : 'daily'} energy need. Storage firms what you generate — add wind or solar capacity to raise the green ceiling.`}
                   </p>
                 )}
               </div>
@@ -1537,8 +1689,8 @@ export default function FirmingCalculator() {
                       aria-hidden="true"
                     />
                     {augmentations > 0
-                      ? `Budgeted stack replacement${augmentations > 1 ? 's' : ''} (${augmentations}×) to keep Lithium-ion at contract capacity over ${years} years — a planned cost in any honest BESS model, and a line item HD Hydro simply doesn't have.`
-                      : 'Within ~10 years Li-ion avoids replacement — but degrades ~2% every year regardless.'}
+                      ? `Budgeted stack replacement${augmentations > 1 ? 's' : ''} (${augmentations}×) to keep Lithium-ion at contract capacity over ${years} years — a planned cost in any honest BESS model. HD Hydro's 5-yearly turbine-runner refresh is already inside its O&M line; there is no capacity to replace.`
+                      : 'Within ~10 years Li-ion avoids replacement — but degrades ~2% every year regardless. HD Hydro’s runner refresh is already inside its O&M line.'}
                   </p>
                 </div>
 
@@ -1730,13 +1882,13 @@ export default function FirmingCalculator() {
                   <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
                     <div className="rhe-glow font-mono text-xl font-black text-[#CCFF00]">
                       {presetId === 'anglesey'
-                        ? `+${(simDay.firmingFactor - simDay.bareCoverage).toFixed(0)}pts`
-                        : `−${(simDay.peakGridBefore - simDay.peakGridAfter).toFixed(0)}pts`}
+                        ? `+${(simYear.firmingFactor - simYear.bareCoverage).toFixed(0)}pts`
+                        : `−${(simYear.peakGridBefore - simYear.peakGridAfter).toFixed(0)}pts`}
                     </div>
                     <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                       {presetId === 'anglesey'
-                        ? `Continuous green power (${simDay.bareCoverage.toFixed(0)}% → ${simDay.firmingFactor.toFixed(0)}%)`
-                        : `Peak-price grid exposure (${simDay.peakGridBefore.toFixed(0)}% → ${simDay.peakGridAfter.toFixed(0)}%)`}
+                        ? `Continuous green power (${simYear.bareCoverage.toFixed(0)}% → ${simYear.firmingFactor.toFixed(0)}%)`
+                        : `Peak-price grid exposure (${simYear.peakGridBefore.toFixed(0)}% → ${simYear.peakGridAfter.toFixed(0)}%)`}
                     </div>
                   </div>
                   <div className="border border-[#CCFF00]/40 bg-[#0B1120] p-3">
@@ -1785,9 +1937,15 @@ export default function FirmingCalculator() {
               <div className="grid grid-cols-1 gap-4 border-t border-slate-800 p-5 text-[11px] leading-relaxed text-slate-500 sm:grid-cols-3">
                 <div>
                   <div className="mb-1 font-bold text-[#CCFF00]">RheEnergise HD Hydro</div>
-                  £850/kW + £125/kWh installed (target cost) · 80% round-trip efficiency ·
-                  60-year life, 0% degradation · 1.5%/yr O&amp;M · 15% machinery
-                  refurbishment provision at year 30.
+                  Target project capex $310/kWh (≈£{Math.round(HD_REF_COST_PER_KWH)}/kWh) at
+                  the 30&nbsp;MWh reference build, split £{HD_POWER_CAPEX_PER_KW}/kW machinery
+                  + £{Math.round(HD_ENERGY_CAPEX_PER_KWH)}/kWh storage, falling with scale
+                  (exponent {HD_SCALE_EXPONENT}, floored at {Math.round(HD_SCALE_FLOOR * 100)}%
+                  of reference cost) — your design: £
+                  {Math.round(hdCapex / (energyCapMWh * 1000)).toLocaleString('en-GB')}/kWh ·
+                  80% round-trip efficiency · 60-year life, 0% degradation · O&amp;M 1%/yr of
+                  capex plus a ≈$1,600 (£{Math.round(HD_REPLACEMENT_PER_MWH_YEAR).toLocaleString('en-GB')})
+                  /MWh/yr provision for 5-yearly turbine-runner replacements, absorbed in OPEX.
                 </div>
                 <div>
                   <div className="mb-1 font-bold text-amber-500">Lithium-ion BESS</div>
@@ -1867,8 +2025,8 @@ export default function FirmingCalculator() {
         <div className="border-2 border-[#9BC400] bg-[#F5FBE0] p-3">
           <div className="font-mono text-2xl font-black text-[#5C7A00]">
             {presetId === 'anglesey'
-              ? `${simDay.bareCoverage.toFixed(0)}% → ${simDay.firmingFactor.toFixed(0)}%`
-              : `${simDay.peakGridBefore.toFixed(0)}% → ${simDay.peakGridAfter.toFixed(0)}%`}
+              ? `${simYear.bareCoverage.toFixed(0)}% → ${simYear.firmingFactor.toFixed(0)}%`
+              : `${simYear.peakGridBefore.toFixed(0)}% → ${simYear.peakGridAfter.toFixed(0)}%`}
           </div>
           <div className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">
             {presetId === 'anglesey'
@@ -1960,8 +2118,9 @@ export default function FirmingCalculator() {
 
       <p className="mt-4 border-t border-slate-300 pt-2 text-[9px] leading-snug text-slate-500">
         Indicative modelling for commercial discussion — not a binding quotation. GBP, real
-        terms. Assumptions: HD Hydro £850/kW + £125/kWh, 80% RTE, 1.5%/yr O&amp;M, year-30
-        refurbishment provision · Li-ion £80/kW + £170/kWh ({liOutlook.label.toLowerCase()}),
+        terms. Assumptions: HD Hydro target capex $310/kWh at 30 MWh reference, scaling with size
+        (your design: £{Math.round(hdCapex / (energyCapMWh * 1000))}/kWh), 80% RTE, 1%/yr
+        O&amp;M + ≈$1,600/MWh/yr runner-replacement provision in OPEX · Li-ion £80/kW + £170/kWh ({liOutlook.label.toLowerCase()}),
         85% RTE −2%/yr, augmentation every ~11 yrs at 30% of energy capex · 330 cycles/yr ·
         {discountPct}% cost of capital · CO₂e at {GAS_CO2_T_PER_MWH} t/MWh vs unabated gas
         firming. Scenario link: {scenarioLink}
