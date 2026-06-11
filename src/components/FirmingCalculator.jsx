@@ -455,11 +455,17 @@ function buildWeekProfiles(preset, windMW, solarMW, demandMW) {
  * The horizon is repeated until the state of charge reaches a cyclic steady
  * state, then the settled pass is reported.
  */
-function runStorageSim(preset, profiles, storagePowerMW, durationHours) {
+function runStorageSim(
+  preset,
+  profiles,
+  storagePowerMW,
+  durationHours,
+  { rte = TECH.hdHydro.rte, capacityFactor = 1 } = {},
+) {
   const { wind, solar, load, labels } = profiles
   const N = load.length
-  const oneWayEff = Math.sqrt(TECH.hdHydro.rte) // 80% RTE split across charge/discharge
-  const energyCapMWh = storagePowerMW * durationHours
+  const oneWayEff = Math.sqrt(rte) // round-trip efficiency split across charge/discharge
+  const energyCapMWh = storagePowerMW * durationHours * capacityFactor
 
   let soc = energyCapMWh * 0.5
   let greenIn = 0
@@ -585,7 +591,7 @@ const SOLAR_MONTH_FACTORS = normalise([
 const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-function simulateYear(preset, windMW, solarMW, demandMW, storageMW, durationHours) {
+function simulateYear(preset, windMW, solarMW, demandMW, storageMW, durationHours, techParams) {
   const base = buildDayProfiles(preset, windMW, solarMW, demandMW)
   const months = []
   let loadSum = 0
@@ -604,7 +610,7 @@ function simulateYear(preset, windMW, solarMW, demandMW, storageMW, durationHour
       load: base.load,
       labels: base.labels,
     }
-    const s = runStorageSim(preset, profiles, storageMW, durationHours)
+    const s = runStorageSim(preset, profiles, storageMW, durationHours, techParams)
     const days = MONTH_DAYS[m]
     const monthLoad = s.dailyLoad * days
     months.push({
@@ -872,6 +878,19 @@ export default function FirmingCalculator() {
 
   const sim = viewMode === 'week' && simWeek ? simWeek : viewMode === 'year' ? simYear : simDay
 
+  // Same store, modelled as Lithium-ion at start-of-life capability (85% RTE
+  // vs HD Hydro's 80%) — for the three-way firming comparison in section 01.
+  const simLi = useMemo(() => {
+    const liParams = { rte: TECH.lithium.rte, capacityFactor: 1 }
+    if (viewMode === 'year')
+      return simulateYear(preset, windMW, solarMW, demandMW, storageMW, durationHours, liParams)
+    const profiles =
+      viewMode === 'week'
+        ? buildWeekProfiles(preset, windMW, solarMW, demandMW)
+        : buildDayProfiles(preset, windMW, solarMW, demandMW)
+    return runStorageSim(preset, profiles, storageMW, durationHours, liParams)
+  }, [viewMode, preset, windMW, solarMW, demandMW, storageMW, durationHours])
+
   const lcos = useMemo(
     () => ({
       hdHydro: calcLcos('hdHydro', storageMW, durationHours, years, finance),
@@ -952,6 +971,7 @@ export default function FirmingCalculator() {
   // for industrial buyers.
   const kpiBefore = preset.kpi === 'green' ? sim.bareCoverage : 100 - sim.peakGridBefore
   const kpiAfter = preset.kpi === 'green' ? sim.firmingFactor : 100 - sim.peakGridAfter
+  const kpiWithLi = preset.kpi === 'green' ? simLi.firmingFactor : 100 - simLi.peakGridAfter
 
   return (
     <>
@@ -1255,23 +1275,34 @@ export default function FirmingCalculator() {
                     </span>
                   </div>
                   <div>
-                    <div className="flex items-stretch gap-2">
-                      <div className="border border-slate-700 px-3 py-1.5 text-right">
+                    <div className="flex items-stretch gap-1.5">
+                      <div className="border border-slate-700 px-3 py-1.5 text-center">
                         <div className="font-mono text-xl font-black leading-none text-slate-500">
                           {kpiBefore.toFixed(0)}%
                         </div>
-                        <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-slate-600">
-                          {preset.kpi === 'green' ? 'Green, no storage' : 'Self-supplied, no storage'}
+                        <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.1em] text-slate-600">
+                          No storage
                         </div>
                       </div>
-                      <div className="flex items-center text-slate-500" aria-hidden="true">
-                        <ArrowRight size={16} />
+                      <div className="flex items-center text-slate-600" aria-hidden="true">
+                        <ArrowRight size={14} />
                       </div>
-                      <div className="border border-[#CCFF00] bg-[#CCFF00]/10 px-3 py-1.5 text-right">
+                      <div className="border border-amber-500/50 bg-amber-500/5 px-3 py-1.5 text-center">
+                        <div className="font-mono text-xl font-black leading-none text-amber-400">
+                          {kpiWithLi.toFixed(0)}%
+                        </div>
+                        <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.1em] text-amber-500/80">
+                          With Li-ion
+                        </div>
+                      </div>
+                      <div className="flex items-center text-slate-600" aria-hidden="true">
+                        <ArrowRight size={14} />
+                      </div>
+                      <div className="border border-[#CCFF00] bg-[#CCFF00]/10 px-3 py-1.5 text-center">
                         <div className="rhe-glow font-mono text-xl font-black leading-none text-[#CCFF00]">
                           {kpiAfter.toFixed(0)}%
                         </div>
-                        <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-slate-400">
+                        <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.1em] text-slate-300">
                           With HD Hydro
                         </div>
                       </div>
@@ -1407,6 +1438,13 @@ export default function FirmingCalculator() {
                     : 'Bright green: the store deploying through deficits. Dim green below the line: catching excess power that would otherwise be curtailed.'}
                   {viewMode === 'week' &&
                     ' Days 4–5 are a wind lull — slide the duration up to ride further into it.'}
+                </p>
+                <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
+                  The comparison above runs the same {fmtMW(storageMW)} / {fmtMWh(energyCapMWh)}{' '}
+                  store as Lithium-ion (85% efficiency, shown at start-of-life) and as HD Hydro
+                  (80% efficiency). Firming capability is close — but Li-ion loses ~2%/yr and
+                  needs cell replacement to hold it, while HD Hydro delivers it for 60 years
+                  with zero degradation. The real difference is cost and longevity, below.
                 </p>
                 {preset.kpi === 'green' && sim.genCoverage > 0 && sim.genCoverage < 0.95 && (
                   <p className="mt-2 flex items-start gap-1.5 border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] leading-snug text-amber-400/90">
