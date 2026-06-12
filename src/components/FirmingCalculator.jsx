@@ -140,6 +140,10 @@ const TECH = {
 
 const CYCLES_PER_YEAR = 330 // one full cycle per day with maintenance margin
 const GAS_CO2_T_PER_MWH = 0.35 // unabated CCGT displaced at firming hours
+// Indicative all-in land take (both reservoirs, plant & pipes) at ~200m head:
+// R-19 stores ~1.4 kWh/m3 at that head, so ~200 m2 per MWh including balance
+// of plant. Engineering estimate, head-dependent — disclosed in assumptions.
+const LAND_HA_PER_MWH = 0.02
 
 // Sensitivity: where do Lithium-ion prices go from here?
 const LI_OUTLOOKS = [
@@ -943,6 +947,7 @@ export default function FirmingCalculator() {
   const storageVsDemand = storageMW / Math.max(demandMW, 1)
   const capFloorEligible = durationHours >= 8
   const hdCapex = techCapex('hdHydro', storageMW, durationHours)
+  const landTakeHa = energyCapMWh * LAND_HA_PER_MWH
 
   const advice =
     durationHours <= 5
@@ -1677,7 +1682,7 @@ export default function FirmingCalculator() {
                     </ResponsiveContainer>
                   </div>
                   {/* Plain-language totals */}
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
                     <div className="border border-slate-700 p-2">
                       <div className="font-mono text-sm font-black text-slate-300">
                         {fmtMillions(cashStart.hdHydro * 1e6)}
@@ -1686,6 +1691,16 @@ export default function FirmingCalculator() {
                       </div>
                       <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-500">
                         Upfront to build · HD / Li-ion
+                      </div>
+                    </div>
+                    <div className="border border-slate-700 p-2">
+                      <div className="font-mono text-sm font-black text-slate-300">
+                        {fmtMillions((cashEnd.hdHydro / years) * 1e6)}
+                        <span className="text-slate-600"> / </span>
+                        {fmtMillions((cashEnd.lithium / years) * 1e6)}
+                      </div>
+                      <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                        Yearly budget line · HD / Li-ion
                       </div>
                     </div>
                     <div className="border border-slate-700 p-2">
@@ -1844,10 +1859,24 @@ export default function FirmingCalculator() {
                     <Leaf size={14} className="text-[#CCFF00]" aria-hidden="true" />
                     Land &amp; Footprint Reduction
                   </div>
-                  <div className="rhe-glow font-mono text-3xl font-black text-[#CCFF00]">60%</div>
+                  <div className="flex items-baseline gap-3">
+                    <span className="rhe-glow font-mono text-3xl font-black text-[#CCFF00]">
+                      60%
+                    </span>
+                    <span className="font-mono text-lg font-black text-slate-300">
+                      ≈{landTakeHa < 1 ? '<1' : Math.round(landTakeHa)} ha
+                      <span className="ml-1 text-[10px] font-bold uppercase text-slate-500">
+                        your design
+                      </span>
+                    </span>
+                  </div>
                   <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
-                    Smaller environmental footprint vs. standard hydro — 2.5× denser R-19
-                    fluid means 60% smaller pipes, tanks and land disruption.
+                    60% smaller footprint vs. standard hydro — 2.5× denser R-19 fluid means
+                    smaller pipes, tanks and land disruption. Your {fmtMWh(energyCapMWh)}{' '}
+                    store needs roughly {landTakeHa < 1 ? 'under a hectare' : `${Math.round(landTakeHa)} hectares`}{' '}
+                    all-in (~{Math.max(1, Math.round(landTakeHa / 0.714))} football pitch
+                    {Math.round(landTakeHa / 0.714) > 1 ? 'es' : ''}) on a single hillside —
+                    indicative, head-dependent.
                   </p>
                 </div>
 
@@ -1884,6 +1913,52 @@ export default function FirmingCalculator() {
                     pumped hydro — small North Wales hillsides, not ranges.
                   </p>
                 </div>
+              </div>
+
+              {/* Route to power — indicative programme */}
+              <div className="border border-slate-800 bg-[#121824] p-4">
+                <div className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">
+                  <Clock size={14} className="text-[#CCFF00]" aria-hidden="true" />
+                  Your Route to Power — indicative programme
+                </div>
+                <div className="flex flex-wrap items-stretch gap-1.5">
+                  {[
+                    ['Develop & consent', '~12–18 months', false],
+                    ['Build on your hillside', '~24–30 months', false],
+                    ['Energised', 'from year ~3', false],
+                    ['Operate at full capacity', '60 years · 0% degradation', true],
+                  ].map(([stage, time, hero], i, arr) => (
+                    <div key={stage} className="flex flex-1 items-stretch gap-1.5">
+                      <div
+                        className={`min-w-32 flex-1 border p-2 text-center ${
+                          hero ? 'border-[#CCFF00] bg-[#CCFF00]/10' : 'border-slate-700'
+                        }`}
+                      >
+                        <div
+                          className={`text-[11px] font-bold ${hero ? 'text-[#CCFF00]' : 'text-slate-300'}`}
+                        >
+                          {stage}
+                        </div>
+                        <div
+                          className={`mt-0.5 font-mono text-[10px] ${hero ? 'text-[#CCFF00]/80' : 'text-slate-500'}`}
+                        >
+                          {time}
+                        </div>
+                      </div>
+                      {i < arr.length - 1 && (
+                        <div className="flex items-center text-slate-600" aria-hidden="true">
+                          <ArrowRight size={14} />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-[11px] leading-snug text-slate-500">
+                  Honest note: containerised batteries can energise ~12–18 months sooner. If
+                  speed-to-power decides your project, that's a genuine Li-ion advantage —
+                  see The Honest Pitch below. Once running, this asset outlives four
+                  battery builds.
+                </p>
               </div>
             </div>
 
@@ -2103,10 +2178,12 @@ export default function FirmingCalculator() {
                   Conventional pumped hydro £1,500/kW + £90/kWh, 78% RTE, 80-year life, 1%/yr
                   O&amp;M · 330 cycles/yr · your selected cost of capital ({discountPct}%)
                   applied equally · CO₂e at {GAS_CO2_T_PER_MWH} t/MWh vs unabated gas firming ·
-                  winter week: 3-day wind lull at ~25% output, solar at 35% seasonal · IRR
-                  &amp; cash chart undiscounted GBP, real terms · cost-only comparison —
-                  revenue stacking is deliberately out of scope (batteries monetise
-                  frequency response; LDES monetises firm capacity and revenue floors).
+                  winter week: 3-day wind lull at ~25% output, solar at 35% seasonal · land
+                  take ~200&nbsp;m²/MWh of storage all-in at ~200&nbsp;m head (engineering
+                  estimate, head-dependent) · programme timings indicative · IRR &amp; cash
+                  chart undiscounted GBP, real terms · cost-only comparison — revenue
+                  stacking is deliberately out of scope (batteries monetise frequency
+                  response; LDES monetises firm capacity and revenue floors).
                 </div>
               </div>
             </details>
