@@ -158,15 +158,6 @@ function lithiumAugmentations(years) {
   return Math.floor(Math.max(0, years - 1) / TECH.lithium.augmentationIntervalYears)
 }
 
-const LI_DEGRADE_PER_YEAR = 0.02 // ~2% usable-capacity fade per year
-
-// Lithium-ion usable capacity at a given operating year: it fades ~2%/yr, then
-// a stack augmentation restores it to nameplate (every ~11 years).
-function liCapacityAtYear(year) {
-  const sinceAug = year % TECH.lithium.augmentationIntervalYears
-  return Math.max(0.6, 1 - LI_DEGRADE_PER_YEAR * sinceAug)
-}
-
 function techCapex(techKey, powerMW, durationHours, liPriceFactor = 1) {
   const t = TECH[techKey]
   const energyMWh = powerMW * durationHours
@@ -511,7 +502,7 @@ function runStorageSim(
       soc += charge * oneWayEff
       greenIn += charge * oneWayEff
 
-      // Deeside: top up from cheap off-peak grid energy overnight.
+      // Grid-connected sites: top up from cheap off-peak grid energy overnight.
       let gridCharge = 0
       if (preset.gridChargingAllowed && OFF_PEAK(h) && soc < energyCapMWh * 0.95) {
         gridCharge = Math.min(ratedPowerMW - charge, (energyCapMWh - soc) / oneWayEff)
@@ -799,7 +790,6 @@ export default function FirmingCalculator() {
   const [discountPct, setDiscountPct] = useState(INIT.discountPct)
   const [liOutlookId, setLiOutlookId] = useState(INIT.liOutlookId)
   const [viewMode, setViewMode] = useState(INIT.viewMode)
-  const [liYear, setLiYear] = useState(1)
   const [linkCopied, setLinkCopied] = useState(false)
 
   const preset = PRESETS[presetId]
@@ -890,27 +880,6 @@ export default function FirmingCalculator() {
 
   const sim = viewMode === 'week' && simWeek ? simWeek : viewMode === 'year' ? simYear : simDay
 
-  // Same store, modelled as Lithium-ion (85% RTE vs HD Hydro's 80%) at the
-  // selected battery age — for the three-way firming comparison in section 01.
-  // Capacity fades ~2%/yr and is restored at each stack augmentation.
-  const liYearEff = Math.min(liYear, years)
-  const liCapacity = liCapacityAtYear(liYearEff)
-  const liAugDone = Math.floor(liYearEff / TECH.lithium.augmentationIntervalYears)
-  const simLi = useMemo(() => {
-    const liParams = { rte: TECH.lithium.rte, capacityFactor: liCapacity }
-    if (viewMode === 'year')
-      return simulateYear(preset, windMW, solarMW, demandMW, storageMW, durationHours, liParams)
-    const profiles =
-      viewMode === 'week'
-        ? buildWeekProfiles(preset, windMW, solarMW, demandMW)
-        : buildDayProfiles(preset, windMW, solarMW, demandMW)
-    return runStorageSim(preset, profiles, storageMW, durationHours, liParams)
-  }, [viewMode, preset, windMW, solarMW, demandMW, storageMW, durationHours, liCapacity])
-
-  const liYearOptions = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60].filter(
-    (y) => y <= years,
-  )
-
   const lcos = useMemo(
     () => ({
       hdHydro: calcLcos('hdHydro', storageMW, durationHours, years, finance),
@@ -999,7 +968,6 @@ export default function FirmingCalculator() {
   // for industrial buyers.
   const kpiBefore = preset.kpi === 'green' ? sim.bareCoverage : 100 - sim.peakGridBefore
   const kpiAfter = preset.kpi === 'green' ? sim.firmingFactor : 100 - sim.peakGridAfter
-  const kpiWithLi = preset.kpi === 'green' ? simLi.firmingFactor : 100 - simLi.peakGridAfter
 
   return (
     <>
@@ -1124,7 +1092,7 @@ export default function FirmingCalculator() {
                 <Slider
                   icon={Wind}
                   label="Wind Capacity"
-                  sublabel={`${Math.round(preset.windCapacityFactor * 100)}% capacity factor at this site`}
+                  sublabel={`${Math.round(preset.windCapacityFactor * 100)}% capacity factor for this project profile`}
                   value={windMW}
                   min={0}
                   max={1000}
@@ -1303,73 +1271,28 @@ export default function FirmingCalculator() {
                     </span>
                   </div>
                   <div>
-                    <div className="flex items-stretch gap-1.5">
+                    <div className="flex items-stretch gap-2">
                       <div className="border border-slate-700 px-3 py-1.5 text-center">
                         <div className="font-mono text-xl font-black leading-none text-slate-500">
                           {kpiBefore.toFixed(0)}%
                         </div>
-                        <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.1em] text-slate-600">
+                        <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-slate-600">
                           No storage
                         </div>
                       </div>
-                      <div className="flex items-center text-slate-600" aria-hidden="true">
-                        <ArrowRight size={14} />
-                      </div>
-                      <div className="border border-amber-500/50 bg-amber-500/5 px-3 py-1.5 text-center">
-                        <div className="font-mono text-xl font-black leading-none text-amber-400">
-                          {kpiWithLi.toFixed(0)}%
-                        </div>
-                        <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.1em] text-amber-500/80">
-                          Li-ion · Yr {liYearEff}
-                        </div>
-                      </div>
-                      <div className="flex items-center text-slate-600" aria-hidden="true">
-                        <ArrowRight size={14} />
+                      <div className="flex items-center text-slate-500" aria-hidden="true">
+                        <ArrowRight size={16} />
                       </div>
                       <div className="border border-[#CCFF00] bg-[#CCFF00]/10 px-3 py-1.5 text-center">
                         <div className="rhe-glow font-mono text-xl font-black leading-none text-[#CCFF00]">
                           {kpiAfter.toFixed(0)}%
                         </div>
-                        <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.1em] text-slate-300">
-                          With HD Hydro
+                        <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-slate-300">
+                          With storage
                         </div>
                       </div>
                     </div>
                   </div>
-                </div>
-
-                {/* Battery-age selector — watch Li-ion fade as HD Hydro holds */}
-                <div className="mb-3 flex flex-wrap items-center gap-2 border-t border-slate-800 pt-3">
-                  <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                    <RefreshCcw size={12} className="text-amber-500" aria-hidden="true" />
-                    Battery age
-                  </span>
-                  {liYearOptions.map((y) => (
-                    <button
-                      key={y}
-                      type="button"
-                      onClick={() => setLiYear(y)}
-                      aria-pressed={liYearEff === y}
-                      className={`border px-2 py-0.5 text-[11px] font-bold transition-colors ${
-                        liYearEff === y
-                          ? 'border-amber-500 bg-amber-500/10 text-amber-400'
-                          : 'border-slate-700 text-slate-500 hover:border-slate-500'
-                      }`}
-                    >
-                      Yr {y}
-                    </button>
-                  ))}
-                  <span className="text-[11px] text-slate-500">
-                    Li-ion at {Math.round(liCapacity * 100)}% of nameplate
-                    {liAugDone > 0
-                      ? ` (after ${liAugDone} cell replacement${liAugDone > 1 ? 's' : ''})`
-                      : ' (degrading ~2%/yr from new)'}
-                    {' · '}
-                    {kpiWithLi < kpiAfter - 1
-                      ? 'now under-delivers vs HD Hydro — only new cells claw it back'
-                      : 'still firms your load here — so the penalty is cost, not lost output (see below)'}
-                    . HD Hydro holds 100% for 60 years.
-                  </span>
                 </div>
 
                 <div className="h-72">
@@ -1500,14 +1423,6 @@ export default function FirmingCalculator() {
                     : 'Bright green: the store deploying through deficits. Dim green below the line: catching excess power that would otherwise be curtailed.'}
                   {viewMode === 'week' &&
                     ' Days 4–5 are a wind lull — slide the duration up to ride further into it.'}
-                </p>
-                <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
-                  The comparison above runs the same {fmtMW(storageMW)} / {fmtMWh(energyCapMWh)}{' '}
-                  store as Lithium-ion (85% efficiency) and as HD Hydro (80% efficiency). Fresh
-                  Li-ion firms about as well — but step the battery age forward and watch its
-                  number fade as cells degrade, recovering only when you spend millions on
-                  replacement. HD Hydro holds its number for 60 years with zero degradation.
-                  The real difference is cost and longevity, below.
                 </p>
                 {preset.kpi === 'green' && sim.genCoverage > 0 && sim.genCoverage < 0.95 && (
                   <p className="mt-2 flex items-start gap-1.5 border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] leading-snug text-amber-400/90">
